@@ -4,6 +4,7 @@
 #include <ks.h>
 #include <ksmedia.h>
 #include <array>
+#include <vector>
 #include <atomic>
 #include <mutex>
 #include <cmath>
@@ -17,9 +18,10 @@ struct AudioFrame {
     std::array<float, Samples * 2> pcm{};
     long long time = 0;
     unsigned epoch = 0;
+    unsigned sampleRate = 44100, samples = 0;
     unsigned long long sequence = 0;
 };
-struct AudioBatch { AudioFrame sample{}; std::array<AudioFrame, 16> frames{}; size_t count = 0; unsigned drops = 0; bool discontinuity = false; };
+struct AudioBatch { AudioFrame sample{}; std::vector<AudioFrame> frames = std::vector<AudioFrame>(64); size_t count = 0; unsigned drops = 0; bool discontinuity = false; };
 class AudioTap {
     std::mutex mutex;
     std::array<AudioFrame, 128> frames{};
@@ -53,6 +55,8 @@ public:
             AudioFrame& frame = frames[next];
             frame = {};
             frame.epoch = epoch;
+            frame.sampleRate = format->nSamplesPerSec;
+            frame.samples = static_cast<unsigned>((std::min)(Samples, total - offset));
             frame.sequence = ++sequence;
             frame.time = time + static_cast<long long>(offset) * 10000000 / format->nSamplesPerSec;
             for (size_t i = 0; i < Samples && offset + i < total; ++i) {

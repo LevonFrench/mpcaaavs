@@ -20,7 +20,8 @@ export class MpcAutoDirector {
   energy = 0;
   private level = .08;
   private previousRms = 0;
-  reset() { this.tempo.reset(); this.analyser.reset(); this.last = -1; this.lastSample = -1; this.onset = -Infinity; this.audible = -Infinity; this.energy = 0; this.level = .08; this.previousRms = 0; this.rearm(); }
+  private bands = new Float32Array(16);
+  reset() { this.tempo.reset(); this.analyser.reset(); this.last = -1; this.lastSample = -1; this.onset = -Infinity; this.audible = -Infinity; this.energy = 0; this.level = .08; this.previousRms = 0; this.bands.fill(0); this.rearm(); }
   rearm() { this.target = Infinity; this.previousBar = -1; this.armedAt = NaN; this.preparationStarted = false; }
   configure(enabled: boolean, bars: number) {
     if (enabled !== this.enabled || bars !== this.bars) this.rearm();
@@ -50,7 +51,15 @@ export class MpcAutoDirector {
     const analysisPcm = pcm.map(value => Math.max(-1, Math.min(1, value * gain)));
     const audio = this.analyser.analyse({ left: analysisPcm.subarray(0, 576), right: analysisPcm.subarray(576) });
     // Ignore repeated high-level triggers on a sustained/decaying sound.
-    if (audio.beat && rms > this.previousRms * 1.12 && position - this.onset >= .22 && rms > .008) { this.onset = position; this.tempo.addOnset(position); }
+    let bandRise = 0;
+    for (let band = 0; band < 16; band++) {
+      let value = 0;
+      for (let bin = band * 32; bin < (band + 1) * 32; bin++) value += Math.max(audio.spectrum[0][bin]!, audio.spectrum[1][bin]!) / (32 * 255);
+      if (band > 0) bandRise = Math.max(bandRise, value - this.bands[band]!); this.bands[band] = value;
+    }
+    // Independent band transients survive steady bass masking overall RMS changes.
+    const onset = audio.beat && rms > this.previousRms * 1.2 || bandRise > .035;
+    if (onset && position - this.onset >= .22 && rms > .008) { this.onset = position; this.tempo.addOnset(position); }
     this.previousRms = rms;
   }
   /** Public for deterministic scheduler checks independent of audio estimation. */

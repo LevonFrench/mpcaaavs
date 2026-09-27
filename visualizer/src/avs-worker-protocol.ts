@@ -1,6 +1,6 @@
 /** Messages shared by the imported-AVS render worker and its browser client. */
 import type { AvsComponentControl } from './avs/executor.ts';
-import type { AvsPresetAst } from './avs/types.ts';
+import type { AvsAudioFrame, AvsPresetAst } from './avs/types.ts';
 import type { AvsFrameGraphLane } from './avs/gpu-frame-graph.ts';
 
 export interface AvsWorkerLoadMessage {
@@ -19,6 +19,8 @@ export interface AvsWorkerRenderMessage {
   readonly generation: number;
   readonly sequence: number;
   readonly pcm: ArrayBuffer;
+  /** Host-accumulated full-band audio; legacy clients may continue sending PCM only. */
+  readonly audio?: AvsAudioFrame;
   readonly width: number;
   readonly height: number;
 }

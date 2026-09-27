@@ -1,3 +1,5 @@
+import { PcmNormalizer, AudioHold, type SourcePcm } from './mpc-audio-stream.ts';
+import { AvsAudioAnalyser } from './avs/audio.ts';
 import { fetchLocalAvsCatalog, fetchLocalAvsPreset } from './avs/local-collection.ts';
 import type { AvsWorkerRequest, AvsWorkerResponse } from './avs-worker-protocol.ts';
 import { FlashGate } from './flash-gate.ts';
@@ -23,7 +25,8 @@ const catalog = await fetchLocalAvsCatalog().catch(error => {
 });
 const presets = new PresetNavigation(catalog.length), director = new MpcAutoDirector(), flash = new FlashGate('limit');
 const composite = document.createElement('canvas'), cc = composite.getContext('2d', { alpha: false })!;
-interface Slot { worker: Worker; generation: number; index: number; busy: boolean; ready: boolean; bitmap: ImageBitmap | null; timeout: number; dead: boolean }
+const normalizer = new PcmNormalizer(), analyser = new AvsAudioAnalyser();
+interface Slot { audio: AudioHold; worker: Worker; generation: number; index: number; busy: boolean; ready: boolean; bitmap: ImageBitmap | null; timeout: number; dead: boolean }
 let active: Slot | null = null, prepared: Slot | null = null, outgoing: Slot | null = null;
 let retryAfter = 0;
 let loading = false, ticket = 0, generation = 0, sequence = 0, autoPending = false;
@@ -47,7 +50,7 @@ function render(slot: Slot) {
   slot.busy = true;
   const data = pcm.slice().buffer;
   const width = 640, height = Math.max(64, Math.min(640, Math.round(width * canvas.clientHeight / Math.max(1, canvas.clientWidth))));
-  const request: AvsWorkerRequest = { type: 'render', generation: slot.generation, sequence: ++sequence, pcm: data, width, height };
+  const request: AvsWorkerRequest = { type: 'render', generation: slot.generation, sequence: ++sequence, pcm: data, audio: slot.audio.consume(), width, height };
   slot.worker.postMessage(request, [data]);
   slot.timeout = window.setTimeout(() => fail(slot, 'Preset render timed out'), 5000);
 }
@@ -89,7 +92,7 @@ async function prepare(index: number, automatic: boolean) {
     ]).finally(() => clearTimeout(fetchTimer));
     if (current !== ticket) return;
     const worker = new Worker(new URL('./avs-render.worker.js', import.meta.url), { type: 'module' });
-    const slot: Slot = { worker, generation: ++generation, index, busy: false, ready: false, bitmap: null, timeout: 0, dead: false };
+    const slot: Slot = { audio: new AudioHold(), worker, generation: ++generation, index, busy: false, ready: false, bitmap: null, timeout: 0, dead: false };
     prepared = slot;
     slot.timeout = window.setTimeout(() => fail(slot, 'Preset initialization timed out'), 15000);
     worker.onerror = event => fail(slot, event.message);
@@ -131,9 +134,15 @@ bridge?.addEventListener('message', event => {
       const seek = epoch !== -1 && (epoch !== message.epoch || message.position < position || message.position - position > .75);
       epoch = message.epoch;
       position = message.position;
-      if (seek) { epoch = message.epoch; director.reset(); cancelPrepared(); presets.cancel(); dirty = true; dispose(outgoing); outgoing = null; transition = null; if (!active) void prepare(presets.index, false); }
-      const frames = Array.isArray(message.frames) ? message.frames.slice(0, 16).filter((frame: {time?: number; pcm?: unknown[]}) => Number.isFinite(frame?.time) && frame.time! <= position && Array.isArray(frame.pcm) && frame.pcm.length === 1152).map((frame: {time: number; pcm: unknown[]}) => ({ time: frame.time, pcm: Float32Array.from(frame.pcm, x => typeof x === 'number' && Number.isFinite(x) ? Math.max(-1, Math.min(1, x)) : 0) })) : undefined;
-      const action = director.update(position, playing, pcm, frames, message.discontinuity === true);
+      if (seek) { epoch = message.epoch; director.reset(); normalizer.reset(); analyser.reset(); active?.audio.reset(); outgoing?.audio.reset(); cancelPrepared(); presets.cancel(); dirty = true; dispose(outgoing); outgoing = null; transition = null; if (!active) void prepare(presets.index, false); }
+      const frames = Array.isArray(message.frames) ? message.frames.slice(0, 64).filter((frame: {time?: number; pcm?: unknown[]}) => Number.isFinite(frame?.time) && frame.time! <= position && Array.isArray(frame.pcm) && frame.pcm.length === 1152).map((frame: {time: number; pcm: unknown[]; sampleRate?: number; samples?: number}) => ({ time: frame.time, sampleRate: frame.sampleRate, samples: frame.samples, pcm: Float32Array.from(frame.pcm, x => typeof x === 'number' && Number.isFinite(x) ? Math.max(-1, Math.min(1, x)) : 0) })) : undefined;
+      if (message.discontinuity === true) { normalizer.reset(); analyser.reset(); active?.audio.reset(); outgoing?.audio.reset(); prepared?.audio.reset(); }
+      const normalized = playing ? frames?.flatMap((frame: SourcePcm) => normalizer.push(frame)) : [];
+      for (const frame of normalized ?? (playing ? [{ time:position, pcm }] : [])) {
+        const audio = analyser.analyse({left:frame.pcm.subarray(0,576),right:frame.pcm.subarray(576)});
+        active?.audio.push(audio); outgoing?.audio.push(audio); prepared?.audio.push(audio);
+      }
+      const action = director.update(position, playing, pcm, normalized, message.discontinuity === true);
       if (active && !outgoing && action.prepare && !loading && !prepared) { const index = candidate(); if (index !== null) void prepare(index, true); }
       if (autoPending && action.switch && prepared?.bitmap) commit();
     }

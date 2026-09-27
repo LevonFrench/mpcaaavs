@@ -39,6 +39,13 @@ await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].te
 await flush();const first=await loadLatest();
 assert.ok(posted.includes('host-ready'));assert.ok(posted.includes('ready'));
 audio(0);tick();assert.ok(renderCount(first)>=2,'fresh audio drives actual rendering');first.send('frame');
+// Audio batches, including a treble burst followed by silence, reach the render request.
+const inputFrames=[];
+for(let offset=0;offset<1728;offset+=576){const p=Array(1152).fill(0);if(offset===0)for(let k=0;k<576;k++)p[k]=.3*Math.sin(2*Math.PI*12000*k/44100);inputFrames.push({time:offset/44100,sampleRate:44100,samples:576,pcm:p});}
+audio(.04,true,{frames:inputFrames});tick();
+const wired=first.requests.filter(r=>r.type==='render').at(-1).audio;
+assert.ok(wired&&Math.max(...wired.spectrum[0].slice(260,300))>100,'held treble spectrum must reach worker');
+assert.equal(Math.max(...wired.spectrum[1]),0,'right channel stays independent');first.send('frame');
 // Superseded asynchronous fetches may resolve in either order without entering history.
 message({type:'next'});await flush();const stale=fetches.at(-1);
 message({type:'next'});await flush();assert.equal(fetches.at(-1).preset.name,'preset 2');
@@ -47,10 +54,10 @@ assert.equal(workers.length,count,'stale fetch must not create a worker');
 assert.equal(first.dead,false,'old renderer survives incoming transition');
 assert.ok(live().length<=2);
 // Complete the transition through media time, avoiding seek discontinuities.
-for(const position of [.5,1,1.5,2]){audio(position);tick(50);}
+for(const position of [.5,1,1.5,2.1]){audio(position);tick(50);}
 assert.equal(first.dead,true,'transition completion releases outgoing renderer');
 message({type:'previous'});await flush();assert.equal(fetches.at(-1).preset.name,'preset 0','Previous skips canceled preset 1');
-audio(2,false);const third=await loadLatest();
+audio(2.1,false);const third=await loadLatest();
 assert.equal(second.dead,true,'paused manual selection cuts immediately');
 assert.ok(nodes.get('#preset').textContent.includes('preset 0'));
 tick();const pausedDraws=draws;tick();assert.equal(draws,pausedDraws,'unchanged paused image is not recomposited');
@@ -61,13 +68,13 @@ message({type:'next'});await flush();assert.equal(fetches.at(-1).preset.name,'pr
 const fourth=await loadLatest();assert.equal(third.dead,true);
 // Native settings restore shuffle and manual fade policy.
 message({type:'settings',enabled:false,shuffle:false,manualFade:false,autoFade:true,durationMs:3000});
-audio(2);message({type:'next'});await flush();const fifth=await loadLatest();
+audio(2.1);message({type:'next'});await flush();const fifth=await loadLatest();
 assert.equal(fourth.dead,true,'manualFade false releases outgoing even while playing');
 tick();fifth.send('frame');const beforeStale=renderCount(fifth);tick(600);
 assert.equal(renderCount(fifth),beforeStale,'stale audio must not submit another render');
 // Both native and document visibility suppress presentation and rendering.
-audio(2,false,{visible:false});nodes.get('#visualizer').clientWidth=9000;const hiddenDraws=draws;tick();assert.equal(draws,hiddenDraws);
-audio(2,false,{visible:true});document.hidden=true;tick();assert.equal(draws,hiddenDraws);document.hidden=false;
+audio(2.1,false,{visible:false});nodes.get('#visualizer').clientWidth=9000;const hiddenDraws=draws;tick();assert.equal(draws,hiddenDraws);
+audio(2.1,false,{visible:true});document.hidden=true;tick();assert.equal(draws,hiddenDraws);document.hidden=false;
 nodes.get('#visualizer').clientHeight=8000;globalThis.devicePixelRatio=4;tick();
 assert.ok(nodes.get('#visualizer').width<=1920&&nodes.get('#visualizer').height<=1080,'presentation pixels are bounded');
 // Protection failure remains visible after announcements expire.

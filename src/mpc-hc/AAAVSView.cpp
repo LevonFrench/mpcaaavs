@@ -183,7 +183,8 @@ void AAAVSView::Tick(HWND parent, bool visible, bool playing, LONGLONG position)
     json << L"],\"discontinuity\":" << (batch.discontinuity ? L"true" : L"false") << L",\"frames\":[";
     if (visible && playing) for (size_t n = 0; n < batch.count; ++n) {
         if (n) json << L',';
-        json << L"{\"time\":" << batch.frames[n].time / 10000000.0 << L",\"pcm\":[";
+        json << L"{\"time\":" << batch.frames[n].time / 10000000.0 << L",\"sampleRate\":" << batch.frames[n].sampleRate
+             << L",\"samples\":" << batch.frames[n].samples << L",\"pcm\":[";
         for (size_t i = 0; i < batch.frames[n].pcm.size(); ++i) { if (i) json << L','; json << batch.frames[n].pcm[i]; }
         json << L"]}";
     }

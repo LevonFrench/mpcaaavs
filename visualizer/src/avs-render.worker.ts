@@ -194,7 +194,7 @@ async function handle(message: AvsWorkerRequest): Promise<void> {
   }
   const pcm = new Float32Array(message.pcm);
   const effectStarted = performance.now();
-  const audio = runtime.pcmAudio.analyse({ left: pcm.subarray(0, 576), right: pcm.subarray(576) });
+  const audio = message.audio ?? runtime.pcmAudio.analyse({ left: pcm.subarray(0, 576), right: pcm.subarray(576) });
   let frame = runtime.render(audio);
   if (movementEelPass) {
     try { movementEelPass.update(audio); }
