@@ -6,8 +6,10 @@
 #include "../src/DSUtil/AAAVSAudio.h"
 #include <cassert>
 #include <iostream>
+#include <memory>
 int main() {
-    AAAVS::AudioTap tap;
+    auto storage = std::make_unique<AAAVS::AudioTap>();
+    auto& tap = *storage;
     WAVEFORMATEX format{};
     format.wFormatTag = WAVE_FORMAT_PCM; format.nChannels = 2;
     format.nSamplesPerSec = 48000; format.wBitsPerSample = 16; format.nBlockAlign = 4;
@@ -29,5 +31,25 @@ int main() {
     float fp[] = {NAN, INFINITY, 2, -2};
     tap.Reset(); tap.Push(reinterpret_cast<BYTE*>(fp), sizeof(fp), &format, 0); frame = tap.Read(0);
     assert(frame.pcm[0] == 0 && frame.pcm[576] == 0 && frame.pcm[1] == 1 && frame.pcm[577] == -1);
-    std::cout << "AAAVS PCM: stereo planar layout, mono, float sanitation, stale silence, seek reset PASS\n";
+    // 5 ms transient between 33 ms UI polls remains in the ordered batch.
+    tap.Reset(); format.wFormatTag = WAVE_FORMAT_PCM; format.nChannels = 1;
+    format.nBlockAlign = 2; format.wBitsPerSample = 16;
+    std::array<short, 576 * 6> pulses{};
+    for (size_t i = 864; i < 1104; ++i) pulses[i] = 16384;
+    tap.Push(reinterpret_cast<BYTE*>(pulses.data()), sizeof(pulses), &format, 0);
+    auto first = tap.ReadBatch(0, 0); assert(first.count == 1);
+    auto batch = tap.ReadBatch(330000, first.frames[0].sequence);
+    assert(batch.count == 2 && !batch.discontinuity);
+    assert(batch.frames[0].time == 120000 && batch.frames[1].time == 240000);
+    assert(batch.frames[0].pcm[288] == .5f);
+    auto last = batch.frames[1].sequence;
+    assert(tap.ReadBatch(330000, last).count == 0);
+    assert(tap.Read(-1).sequence == 0); // Never use future PCM.
+    assert(tap.ReadBatch(4000000, last).count == 0); // Expired windows.
+    tap.Reset();
+    for (int i = 0; i < 140; ++i) tap.Push(reinterpret_cast<BYTE*>(pulses.data()), 1152, &format, i * 120000LL);
+    batch = tap.ReadBatch(139 * 120000LL, last);
+    assert(batch.count == 16 && batch.discontinuity);
+    for (size_t i = 1; i < batch.count; ++i) assert(batch.frames[i].sequence == batch.frames[i-1].sequence + 1);
+    std::cout << "AAAVS PCM: stereo planar layout, mono, float sanitation, stale silence, seek reset, timestamped short-transient batches, deduplication, overflow PASS\n";
 }

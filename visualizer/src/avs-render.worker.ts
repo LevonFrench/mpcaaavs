@@ -17,6 +17,7 @@ import { planTerminalEnhancedMovementEel, type AvsTerminalEnhancedMovementEelPla
 import { EnhancedMovementEelGpuPass, EnhancedMovementEelGpuState } from './avs/effects/movement-eel-gpu.ts';
 import type { AvsFrameGraphLane, AvsFrameGraphTiming } from './avs/gpu-frame-graph.ts';
 import type { AvsWorkerFrameMessage, AvsWorkerRequest, AvsWorkerResponse } from './avs-worker-protocol.ts';
+import { constructOwned } from './owned-resources.ts';
 
 /**
  * GPU observability fields carried on the 'frame' message. Defined here as an
@@ -136,6 +137,7 @@ async function handle(message: AvsWorkerRequest): Promise<void> {
     // leaf is bypassed. Rebuild the exact full CPU graph under live controls.
     if (message.controls.length > 0 && ((gpuPlan?.extractedComponents ?? 0) > 0 || (convolutionPlan?.extractedComponents ?? 0) > 0 || enhancedPlan?.component || dynamicMovementPlan?.component || movementEelPlan?.component) && originalPreset) {
       const controls = message.controls;
+      releaseExactGpuPasses();
       enhancedPass?.destroy();
       enhancedPass = null;
       enhancedPlan = null;
@@ -335,6 +337,8 @@ function compileGpuPasses(): void {
   let passes: PackedAvsGpuPass[];
   try {
     passes = compileConvolutionAndExactPasses();
+    // Publish ownership before optional passes can fail and trigger fallback.
+    gpuPasses = passes;
   } catch (error) {
     disableGpuConvolution(error instanceof Error ? error.message : String(error));
     return;
@@ -346,7 +350,7 @@ function compileGpuPasses(): void {
         device, new EnhancedMovementEelGpuState(movementPlan.config!, movementPlan.program!, runtime!.registry.eelGlobal),
         runtime!.framebuffer.width, runtime!.framebuffer.height,
       ));
-      if (!(compiled instanceof EnhancedMovementEelGpuPass)) throw new TypeError('Custom Movement EEL pass factory returned an unexpected pass');
+      if (!(compiled instanceof EnhancedMovementEelGpuPass)) { compiled.destroy?.(); throw new TypeError('Custom Movement EEL pass factory returned an unexpected pass'); }
       movementEelPass = compiled; passes.push(compiled);
     } catch (error) {
       disableEnhancedMovementEel(error instanceof Error ? error.message : String(error));
@@ -360,6 +364,7 @@ function compileGpuPasses(): void {
         device, plan.config!, plan.program!, runtime!.registry.eelGlobal, hashPath(plan.component!.path),
       ));
       if (!(compiled instanceof EnhancedSuperScopeGpuTerminalPass)) {
+        compiled.destroy?.();
         throw new TypeError('Enhanced SuperScope pass factory returned an unexpected pass');
       }
       enhancedPass = compiled;
@@ -388,6 +393,7 @@ function compileGpuPasses(): void {
           return new EnhancedDynamicMovementGpuPass(device, generator, runtime!.framebuffer.width, runtime!.framebuffer.height);
         });
       if (!(compiled instanceof EnhancedDynamicMovementGpuPass) && !(compiled instanceof EnhancedDynamicMovementResidentGpuPass)) {
+        compiled.destroy?.();
         throw new TypeError('Dynamic Movement pass factory returned an unexpected pass');
       }
       dynamicMovementPass = compiled; passes.push(compiled);
@@ -400,6 +406,7 @@ function compileGpuPasses(): void {
 }
 
 function disableEnhancedMovementEel(reason: string): void {
+  releaseExactGpuPasses();
   movementEelPass?.destroy(); movementEelPass = null; movementEelPlan = null;
   enhancedPass?.destroy(); enhancedPass = null; enhancedPlan = null;
   dynamicMovementPass?.destroy(); dynamicMovementPass = null; dynamicMovementPlan = null; dynamicMovementGenerator = null; dynamicMovementResidentState = null;
@@ -413,6 +420,7 @@ function disableEnhancedMovementEel(reason: string): void {
 }
 
 function disableEnhancedDynamicMovement(reason: string): void {
+  releaseExactGpuPasses();
   dynamicMovementPass?.destroy(); dynamicMovementPass = null; dynamicMovementPlan = null; dynamicMovementGenerator = null; dynamicMovementResidentState = null;
   movementEelPass?.destroy(); movementEelPass = null; movementEelPlan = null;
   enhancedPass?.destroy(); enhancedPass = null; enhancedPlan = null; convolutionPlan = null;
@@ -425,6 +433,7 @@ function disableEnhancedDynamicMovement(reason: string): void {
 }
 
 function disableEnhancedSuperScope(reason: string): void {
+  releaseExactGpuPasses();
   enhancedPass?.destroy();
   enhancedPass = null;
   enhancedPlan = null;
@@ -447,6 +456,7 @@ function disableEnhancedSuperScope(reason: string): void {
 }
 
 function disableGpuConvolution(reason: string): void {
+  releaseExactGpuPasses();
   convolutionPlan = null;
   enhancedPass?.destroy(); enhancedPass = null; enhancedPlan = null;
   dynamicMovementPass?.destroy(); dynamicMovementPass = null; dynamicMovementPlan = null; dynamicMovementGenerator = null; dynamicMovementResidentState = null;
@@ -486,13 +496,13 @@ function compileConvolutionAndExactPasses(): PackedAvsGpuPass[] {
   const configs = convolutionPlan?.configs ?? [];
   const first = gpuPlan.passes[0];
   const fused = configs.length && first?.kind === 'pointwise' ? first.operations : [];
-  const passes = configs.map((config, index) => gpuGraph!.compileExternalPass(device => new ExactAvsConvolutionGpuPass(
+  const factories: (() => PackedAvsGpuPass)[] = configs.map((config, index) => () => gpuGraph!.compileExternalPass(device => new ExactAvsConvolutionGpuPass(
     device, config, runtime!.framebuffer.width, runtime!.framebuffer.height, false,
     index + 1 === configs.length ? fused : [],
   )));
   const remaining = fused.length ? gpuPlan.passes.slice(1) : gpuPlan.passes;
-  passes.push(...remaining.map(config => gpuGraph!.compileExactPass(config)));
-  return passes;
+  factories.push(...remaining.map(config => () => gpuGraph!.compileExactPass(config)));
+  return constructOwned(factories);
 }
 
 function hashPath(path: string): number {

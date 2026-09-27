@@ -55,4 +55,6 @@ for(let mode=1;mode<=15;mode++) {
  const tr=new AvsTransition(mode);
  for(const t of [0,.2,.5,.9,1]) { calls.length=0; tr.draw(context,old,next,t,641,359); assert.ok(calls.length); if(t===1) assert.equal(calls.at(-1)[0],next); }
 }
-console.log(`Auto: fixed/adaptive phrases, silence, pause, seek, 120 BPM lock (${switches} switches) PASS; AVS: 14 modes + cut geometry/endpoints PASS`);
+const { checkTransitionRaster } = await import('./mpc-transition-raster-check.mjs');
+checkTransitionRaster(AvsTransition);
+console.log(`Auto: fixed/adaptive phrases, silence, pause, seek, 120 BPM lock (${switches} switches) PASS; AVS: CPU raster geometry modes 1–13, all-mode draw-call/endpoints smoke PASS (browser raster acceptance pending)`);

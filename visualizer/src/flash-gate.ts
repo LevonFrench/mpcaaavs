@@ -36,7 +36,8 @@ export class FlashGate {
   private readonly stats = createFrameStats();
   private readonly sample: FlashProbeSampler;
   private readonly offDecision: FlashDecision = { mode: 'off', blend: 1, limited: false, flashRate: 0, redFlashRate: 0 };
-  /** False once the probe could not be read: the gate is then passing frames through unmeasured. */
+  private readonly heldDecision: FlashDecision = { mode: 'limit', blend: 0, limited: true, flashRate: 0, redFlashRate: 0 };
+  /** False when the probe could not be read: retain the last presented frame. */
   available = true;
 
   constructor(mode: FlashMode = 'limit', sampler: FlashProbeSampler = canvasProbeSampler()) {
@@ -71,14 +72,14 @@ export class FlashGate {
       draw();
       return this.offDecision;
     }
-    const pixels = this.sample(source);
+    let pixels: Uint8ClampedArray | null;
+    try { pixels = this.sample(source); } catch { pixels = null; }
     if (!pixels || pixels.length < PROBE_W * PROBE_H * 4) {
-      // Unmeasurable: pass through rather than freeze the output, and say so.
-      // The whole frame goes up, which the prediction cannot know about.
+      // Hold the retained canvas. Keep history because no new frame was shown.
       this.available = false;
-      this.limiter.reset();
-      draw();
-      return this.offDecision;
+      context.globalAlpha = 1;
+      this.heldDecision.mode = this.limiter.mode;
+      return this.heldDecision;
     }
     this.available = true;
     const d = this.limiter.evaluate(computeFrameStatsRgba(pixels, PROBE_W, PROBE_H, this.stats), tSec);

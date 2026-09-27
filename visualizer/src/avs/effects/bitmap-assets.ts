@@ -19,11 +19,19 @@ export function createAvsBitmapResolver(
   assets: Readonly<Record<string, AvsBitmapAsset>> | ReadonlyMap<string, AvsBitmapAsset>,
 ): AvsBitmapResolver {
   const resolved = new Map<string, AvsBitmap>();
+  const decoded = new Map<AvsBitmapAsset, AvsBitmap>();
+  const byteViews = new Map<ArrayBufferLike, Map<string, AvsBitmap>>();
   const entries: Iterable<readonly [string, AvsBitmapAsset]> = assets instanceof Map
     ? assets.entries()
     : Object.entries(assets);
   for (const [name, value] of entries) {
-    const bitmap = value instanceof Uint8Array ? decodeAvsBmp(value) : validateBitmap(value);
+    const key = value instanceof Uint8Array ? `${value.byteOffset}:${value.byteLength}` : '';
+    const cached = value instanceof Uint8Array ? byteViews.get(value.buffer)?.get(key) : decoded.get(value);
+    const bitmap = cached ?? (value instanceof Uint8Array ? decodeAvsBmp(value) : validateBitmap(value));
+    if (value instanceof Uint8Array) {
+      const views = byteViews.get(value.buffer) ?? new Map<string, AvsBitmap>();
+      views.set(key, bitmap); byteViews.set(value.buffer, views);
+    } else decoded.set(value, bitmap);
     const normalized = normalizeName(name);
     resolved.set(normalized, bitmap);
     resolved.set(basename(normalized), bitmap);
@@ -50,8 +58,18 @@ export function decodeAvsBmp(bytes: Uint8Array): AvsBitmap {
   const compression = u32(view, 30);
   if (width <= 0 || rawHeight === 0 || planes !== 1) throw new Error('Invalid BMP dimensions or plane count');
   const height = Math.abs(rawHeight);
+  // Reject expansion bombs before allocating pixels, including compressed RLE.
+  if (!Number.isSafeInteger(width * height) || width * height > 16_777_216) throw new Error('BMP exceeds pixel budget');
   const topDown = rawHeight < 0;
   if (pixelOffset > bytes.length) throw new Error('BMP pixel offset is outside the file');
+
+  if (!(compression === 1 && bits === 8)
+    && !(compression === 0 && [1, 4, 8, 16, 24, 32].includes(bits))
+    && !(compression === 3 && [16, 32].includes(bits))) throw new Error('Unsupported BMP encoding');
+  if (compression !== 1) {
+    const stride = Math.floor((width * bits + 31) / 32) * 4;
+    if (pixelOffset + stride * height > bytes.length) throw new Error('Truncated BMP pixel rows');
+  }
 
   const palette = readPalette(bytes, view, dibSize, bits);
   const pixels = new Uint32Array(width * height);
@@ -158,6 +176,7 @@ function readPalette(bytes: Uint8Array, view: DataView, dibSize: number, bits: n
 
 interface Masks { readonly red: number; readonly green: number; readonly blue: number }
 function colorMasks(view: DataView, bits: number, compression: number, dibSize: number): Masks {
+  if (bits !== 16 && bits !== 32) return { red: 0, green: 0, blue: 0 };
   if (bits === 16 && compression === 0) return { red: 0x7c00, green: 0x03e0, blue: 0x001f };
   if (bits === 32 && compression === 0) return { red: 0x00ff0000, green: 0x0000ff00, blue: 0x000000ff };
   const offset = dibSize >= 52 ? 14 + 40 : 14 + dibSize;

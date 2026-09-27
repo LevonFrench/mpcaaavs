@@ -1747,6 +1747,14 @@ BEGIN
             MENUITEM "While &Playing",              ID_ONTOP_WHILEPLAYING
             MENUITEM "While Playing &Video",        ID_ONTOP_WHILEPLAYINGVIDEO
         END
+        POPUP "&Visualizer"
+        BEGIN
+            MENUITEM "&Previous preset", ID_AAAVS_PREVIOUS
+            MENUITEM "&Next preset", ID_AAAVS_NEXT
+            MENUITEM "&Shuffle presets", ID_AAAVS_SHUFFLE
+            MENUITEM "&Automatic preset switching", ID_AAAVS_AUTO
+            MENUITEM "Visualizer &options...", ID_AAAVS_OPTIONS
+        END
         MENUITEM "&Options...",                 ID_VIEW_OPTIONS
     END
     POPUP "&Play"
@@ -2593,6 +2601,15 @@ END
 //
 // String Table
 //
+
+STRINGTABLE
+BEGIN
+    ID_AAAVS_PREVIOUS "Visualizer: Previous preset"
+    ID_AAAVS_NEXT "Visualizer: Next preset"
+    ID_AAAVS_SHUFFLE "Visualizer: Shuffle presets"
+    ID_AAAVS_AUTO "Visualizer: Automatic preset switching"
+    ID_AAAVS_OPTIONS "Visualizer: Options"
+END
 
 STRINGTABLE
 BEGIN

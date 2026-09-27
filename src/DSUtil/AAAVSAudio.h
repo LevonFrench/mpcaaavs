@@ -4,6 +4,7 @@
 #include <ks.h>
 #include <ksmedia.h>
 #include <array>
+#include <atomic>
 #include <mutex>
 #include <cmath>
 #include <cstring>
@@ -16,12 +17,16 @@ struct AudioFrame {
     std::array<float, Samples * 2> pcm{};
     long long time = 0;
     unsigned epoch = 0;
+    unsigned long long sequence = 0;
 };
+struct AudioBatch { AudioFrame sample{}; std::array<AudioFrame, 16> frames{}; size_t count = 0; unsigned drops = 0; bool discontinuity = false; };
 class AudioTap {
     std::mutex mutex;
     std::array<AudioFrame, 128> frames{};
     size_t next = 0, count = 0;
     unsigned epoch = 0;
+    unsigned long long sequence = 0;
+    std::atomic<unsigned> drops{0};
 public:
     void Reset() {
         std::lock_guard<std::mutex> lock(mutex);
@@ -41,13 +46,14 @@ public:
         if (!(fp && (bits == 32 || bits == 64)) && !(pcm && (bits == 8 || bits == 16 || bits == 24 || bits == 32))) return;
         if (format->nBlockAlign < stride * format->nChannels) return;
         std::unique_lock<std::mutex> lock(mutex, std::try_to_lock);
-        if (!lock.owns_lock()) return;
+        if (!lock.owns_lock()) { ++drops; return; }
         const size_t total = length / format->nBlockAlign;
         // Fixed 576-source-sample windows, timestamped in media time.
         for (size_t offset = 0; offset < total; offset += Samples) {
             AudioFrame& frame = frames[next];
             frame = {};
             frame.epoch = epoch;
+            frame.sequence = ++sequence;
             frame.time = time + static_cast<long long>(offset) * 10000000 / format->nSamplesPerSec;
             for (size_t i = 0; i < Samples && offset + i < total; ++i) {
                 for (size_t ch = 0; ch < 2; ++ch) {
@@ -66,6 +72,24 @@ public:
             count = (std::min)(count + 1, frames.size());
         }
     }
+    // Consume unseen past windows in source order. Bounded catch-up; signal gaps explicitly.
+    AudioBatch ReadBatch(long long position, unsigned long long after, unsigned afterDrops = 0) {
+        std::lock_guard<std::mutex> lock(mutex);
+        AudioBatch result{}; result.sample.epoch = epoch; result.drops = drops.load(); result.discontinuity = result.drops != afterDrops;
+        for (size_t i = 0; i < count; ++i) {
+            const auto& frame = frames[(next + frames.size() - count + i) % frames.size()];
+            if (frame.time > position || position - frame.time >= 2500000) continue;
+            result.sample = frame;
+            if (frame.sequence <= after) continue;
+            if (result.count == result.frames.size()) {
+                std::move(result.frames.begin() + 1, result.frames.end(), result.frames.begin());
+                --result.count; result.discontinuity = true;
+            }
+            result.frames[result.count++] = frame;
+        }
+        if (after && result.count && result.frames[0].sequence != after + 1) result.discontinuity = true;
+        return result;
+    }
     AudioFrame Read(long long position) {
         std::lock_guard<std::mutex> lock(mutex);
         AudioFrame result{};
@@ -73,8 +97,8 @@ public:
         long long best = 2500000; // Never reuse PCM more than 250 ms away.
         for (size_t i = 0; i < count; ++i) {
             const auto& frame = frames[(next + frames.size() - 1 - i) % frames.size()];
-            const auto distance = std::llabs(frame.time - position);
-            if (distance < best) { best = distance; result = frame; }
+            const auto distance = position - frame.time;
+            if (distance >= 0 && distance < best) { best = distance; result = frame; }
         }
         return result;
     }

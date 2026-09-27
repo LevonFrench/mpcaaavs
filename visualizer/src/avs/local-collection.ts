@@ -1,3 +1,4 @@
+import { boundedBytes, boundedJson, localAssetUrl, MAX_ASSET_BYTES, MAX_CATALOG_ENTRIES, verifyDigest } from './local-assets.ts';
 export interface LocalAvsPreset {
   readonly id: string;
   readonly name: string;
@@ -34,17 +35,8 @@ export async function fetchLocalAvsCatalog(): Promise<readonly LocalAvsPreset[]>
   const base = typeof document === 'undefined' ? 'http://127.0.0.1/' : document.baseURI;
   const catalogUrl = new URL(`${COLLECTION_ROOT}catalog/presets.json`, base);
   const validationUrl = new URL(`${COLLECTION_ROOT}catalog/parser-validation.json`, base);
-  const [response, validationResponse] = await Promise.all([
-    fetch(catalogUrl, { cache: 'no-store' }),
-    fetch(validationUrl, { cache: 'no-store' }),
-  ]);
-  if (!response.ok) throw new Error(`Local AVS collection unavailable (HTTP ${response.status})`);
-  if (!validationResponse.ok) throw new Error(`Local AVS parser metadata unavailable (HTTP ${validationResponse.status})`);
-  return parseLocalAvsCatalog(
-    await response.json() as LocalCatalogJson,
-    await validationResponse.json() as ParserValidationJson,
-    base,
-  );
+  const [catalog, validation] = await Promise.all([boundedJson(catalogUrl), boundedJson(validationUrl)]);
+  return parseLocalAvsCatalog(catalog as LocalCatalogJson, validation as ParserValidationJson, base);
 }
 
 /** Pure parser used by browser loading and the deterministic catalog check. */
@@ -53,35 +45,35 @@ export function parseLocalAvsCatalog(
   validation: ParserValidationJson,
   baseUrl: string,
 ): readonly LocalAvsPreset[] {
-  if (!Array.isArray(json.presets)) throw new Error('Local AVS catalog has no preset list');
-  if (!Array.isArray(validation.results)) throw new Error('Local AVS parser metadata has no result list');
+  if (!json || !Array.isArray(json.presets) || json.presets.length > MAX_CATALOG_ENTRIES) throw new Error('Local AVS catalog has no preset list');
+  if (!validation || !Array.isArray(validation.results) || validation.results.length > MAX_CATALOG_ENTRIES) throw new Error('Local AVS parser metadata has no result list');
   const parserByHash = new Map(validation.results.map((entry, index) => {
-    if (typeof entry.sha256 !== 'string' || typeof entry.status !== 'string') {
+    if (!entry || typeof entry.sha256 !== 'string' || typeof entry.status !== 'string') {
       throw new Error(`Invalid local AVS parser metadata entry ${index}`);
     }
-    return [entry.sha256, entry] as const;
+    return [entry.sha256.toLowerCase(), entry] as const;
   }));
   return Object.freeze(json.presets.map((entry, index) => {
-    if (typeof entry.sha256 !== 'string' || !/^[0-9a-f]{64}$/i.test(entry.sha256)
-      || typeof entry.display_name !== 'string' || typeof entry.canonical_path !== 'string'
-      || typeof entry.bytes !== 'number' || !Number.isSafeInteger(entry.bytes) || entry.bytes <= 0) {
+    if (!entry || typeof entry.sha256 !== 'string' || !/^[0-9a-f]{64}$/i.test(entry.sha256)
+      || typeof entry.display_name !== 'string' || entry.display_name.length > 2048 || typeof entry.canonical_path !== 'string'
+      || typeof entry.bytes !== 'number' || !Number.isSafeInteger(entry.bytes) || entry.bytes <= 0 || entry.bytes > MAX_ASSET_BYTES) {
       throw new Error(`Invalid local AVS catalog entry ${index}`);
     }
-    const parser = parserByHash.get(entry.sha256);
+    const parser = parserByHash.get(entry.sha256.toLowerCase());
     const parserStatus = parser?.status === 'lossless' || parser?.status === 'roundtrip-mismatch' || parser?.status === 'parse-error'
       ? parser.status
       : 'unknown';
     const unavailableReason = parserStatus === 'parse-error'
       ? typeof parser?.error === 'string' ? parser.error : 'The AVS parser rejected this historical preset'
       : undefined;
-    const relative = entry.canonical_path.split('/').map(encodeURIComponent).join('/');
+    const url = localAssetUrl(entry.canonical_path, 'presets', baseUrl);
     return Object.freeze({
       id: `local:${entry.sha256}`,
       name: entry.display_name,
       fileName: entry.canonical_path.split('/').at(-1)!,
       sha256: entry.sha256,
       bytes: entry.bytes,
-      url: new URL(`${COLLECTION_ROOT}${relative}`, baseUrl).href,
+      url,
       parserStatus,
       autoEligible: parserStatus !== 'parse-error',
       ...(unavailableReason ? { unavailableReason } : {}),
@@ -90,9 +82,9 @@ export function parseLocalAvsCatalog(
 }
 
 export async function fetchLocalAvsPreset(preset: LocalAvsPreset): Promise<Uint8Array> {
-  const response = await fetch(preset.url, { cache: 'no-store' });
-  if (!response.ok) throw new Error(`Could not load ${preset.name}: HTTP ${response.status}`);
-  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (!Number.isSafeInteger(preset.bytes) || preset.bytes <= 0 || preset.bytes > MAX_ASSET_BYTES) throw new Error('Invalid local preset byte size');
+  const bytes = await boundedBytes(preset.url, preset.bytes);
   if (bytes.byteLength !== preset.bytes) throw new Error(`Local AVS size mismatch for ${preset.name}`);
+  await verifyDigest(bytes, preset.sha256);
   return bytes;
 }

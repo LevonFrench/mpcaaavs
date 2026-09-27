@@ -1,7 +1,7 @@
 # AVS transition reference
 
-Reference: https://github.com/grandchild/vis_avs/blob/main/avs/vis_avs/r_transition.cpp
-Configuration: https://github.com/grandchild/vis_avs/blob/main/avs/vis_avs/c_transition.h
+Reference: https://github.com/grandchild/vis_avs/blob/1cee1f3d4f783b830538c3e4d2082a2c59521dee/avs/vis_avs/r_transition.cpp
+Configuration: https://github.com/grandchild/vis_avs/blob/1cee1f3d4f783b830538c3e4d2082a2c59521dee/avs/vis_avs/c_transition.h
 
 J:/projects/mpcaaavs/visualizer/src/mpc-transition.ts emulates cross dissolve; four directional pushes; nine random blocks; split horizontal push; center push and squeeze; four directional wipes; and the stepped dot dissolve. Spatial modes use the original sine easing. Random selects one effect per transition. Block order is fixed at transition start, with monotonic reveal even when frames are skipped. Completion explicitly presents the incoming frame.
 
@@ -12,3 +12,7 @@ Intentional differences: no inherited raw framebuffer state between independent 
 The source repo also offers libavs host APIs, legacy/JSON loading, EEL2, and integrated historical APE effects as future compatibility references. The current AAAVS GPU renderer remains in use.
 
 Attribution is in J:/projects/mpcaaavs/THIRD-PARTY-AVS-TRANSITIONS.txt, copied beside staged executables.
+
+September 27 additions: upstream-inspired separate transition enablement for manual/automatic changes and configurable fixed milliseconds, with MPC-owned persistent preferences. These retain AAAVS musical durations and GPU rendering. Manual browsing while paused cuts to the prepared still; an existing fade freezes on pause. No historical APE binaries or native libavs backend were added.
+
+Validation: CPU raster reference for modes 1–13, draw-call/endpoint smoke for Dot Dissolve, fake-resource cleanup and flash-probe failures. Browser raster fidelity and live GPU cost remain unverified for this revision. Random blocks intentionally recover skipped reveals; odd-width center sampling and dot-dissolve completion differ from the native legacy implementation.
