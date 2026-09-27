@@ -14,7 +14,8 @@ export class MpcAutoDirector {
   private previousBar = -1;
   energy = 0;
   private level = .08;
-  reset() { this.tempo.reset(); this.analyser.reset(); this.last = -1; this.onset = -Infinity; this.audible = -Infinity; this.energy = 0; this.level = .08; this.rearm(); }
+  private previousRms = 0;
+  reset() { this.tempo.reset(); this.analyser.reset(); this.last = -1; this.onset = -Infinity; this.audible = -Infinity; this.energy = 0; this.level = .08; this.previousRms = 0; this.rearm(); }
   rearm() { this.target = Infinity; this.previousBar = -1; }
   configure(enabled: boolean, bars: number) {
     if (enabled !== this.enabled || bars !== this.bars) this.rearm();
@@ -33,7 +34,9 @@ export class MpcAutoDirector {
     const gain = Math.min(8, .3 / Math.max(.02, this.level));
     const analysisPcm = pcm.map(value => Math.max(-1, Math.min(1, value * gain)));
     const audio = this.analyser.analyse({ left: analysisPcm.subarray(0, 576), right: analysisPcm.subarray(576) });
-    if (audio.beat && position - this.onset >= .22 && rms > .008) { this.onset = position; this.tempo.addOnset(position); }
+    // Ignore repeated high-level triggers on a sustained/decaying sound.
+    if (audio.beat && rms > this.previousRms * 1.12 && position - this.onset >= .22 && rms > .008) { this.onset = position; this.tempo.addOnset(position); }
+    this.previousRms = rms;
     this.tempo.update(position);
     return this.grid((this.tempo.beatIndex + this.tempo.phase) / 4, this.tempo.locked && position - this.audible < 1.5);
   }

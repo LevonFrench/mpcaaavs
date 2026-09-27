@@ -4,7 +4,7 @@ An experimental fork of [MPC-HC](https://github.com/clsid2/mpc-hc) that places t
 
 The native toolbar adds **previous preset**, **next preset**, **preset shuffle**, and **Auto** beside the playback controls, using MPC-HC's existing themed icons. Track controls keep their usual behavior. Previous walks actual preset history; shuffle chooses random or sequential selection for both manual and automatic switching. Right-click Auto for phrase and transition options.
 
-**Experimental developer build — not a public binary release.** The Windows x64 Release Lite player now compiles successfully with Visual Studio 2022 v143, MFC/ATL, Windows SDK 10, NASM and Yasm. Local UI checks confirmed embedded visualization, previous/next preset selection, shuffle across the full collection and pause. The embedded renderer bundle, TypeScript checks, navigation tests and native PCM unit test also pass. CI checks source only, not native playback or GPU rendering.
+**Experimental developer build — not a public binary release.** The Windows x64 Release Lite player now compiles successfully with Visual Studio 2022 v143, MFC/ATL, Windows SDK 10, NASM and Yasm. Local UI checks confirmed embedded visualization, previous/next preset selection, shuffle across the full collection, pause, the native Auto options menu, and automatic advancement from preset 1 to 2 on the generated rhythm fixture. The embedded renderer bundle, TypeScript checks, navigation tests and native PCM unit test also pass. CI checks source only, not native playback or GPU rendering.
 
 ## Musical auto switching and AVS transitions
 
