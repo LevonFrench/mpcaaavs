@@ -1,5 +1,5 @@
 import { TempoTracker } from './clock.ts';
-import { AvsAudioAnalyser } from './avs/audio.ts';
+import { MpcTempoEstimator } from './mpc-tempo-estimator.ts';
 
 export interface TimedAudioFrame { time: number; pcm: Float32Array }
 
@@ -7,21 +7,18 @@ export interface TimedAudioFrame { time: number; pcm: Float32Array }
 export class MpcAutoDirector {
   enabled = true;
   bars = 0;
-  readonly tempo = new TempoTracker();
-  private analyser = new AvsAudioAnalyser();
+  // Musical continuity: a fill or short breakdown must not replace the song clock.
+  readonly tempo = new TempoTracker({ coastBeats: 16, recency: .9, tempoGain: .12, changeEvidence: 8 });
+  private estimator = new MpcTempoEstimator();
   private last = -1;
   private lastSample = -1;
   private armedAt = NaN;
   private preparationStarted = false;
-  private onset = -Infinity;
   private audible = -Infinity;
   private target = Infinity;
   private previousBar = -1;
   energy = 0;
-  private level = .08;
-  private previousRms = 0;
-  private bands = new Float32Array(16);
-  reset() { this.tempo.reset(); this.analyser.reset(); this.last = -1; this.lastSample = -1; this.onset = -Infinity; this.audible = -Infinity; this.energy = 0; this.level = .08; this.previousRms = 0; this.bands.fill(0); this.rearm(); }
+  reset() { this.tempo.reset(); this.estimator.reset(); this.last = -1; this.lastSample = -1; this.audible = -Infinity; this.energy = 0; this.rearm(); }
   rearm() { this.target = Infinity; this.previousBar = -1; this.armedAt = NaN; this.preparationStarted = false; }
   configure(enabled: boolean, bars: number) {
     if (enabled !== this.enabled || bars !== this.bars) this.rearm();
@@ -29,7 +26,12 @@ export class MpcAutoDirector {
   }
   update(position: number, playing: boolean, pcm: Float32Array, frames?: readonly TimedAudioFrame[], discontinuity = false): { prepare: boolean; switch: boolean } {
     if (!Number.isFinite(position) || !playing || position === this.last) return { prepare: false, switch: false };
-    if (discontinuity || (this.last >= 0 && (position < this.last || position - this.last > .75))) this.reset();
+    if (this.last >= 0 && (position < this.last || position - this.last > .75)) this.reset();
+    else if (discontinuity) {
+      // A producer/consumer drop is not a seek. Retain the measured beat grid and
+      // phrase target; discard only detector history that straddles missing PCM.
+      this.estimator.gap();
+    }
     this.last = position;
     for (const frame of frames ?? [{ time: position, pcm }]) {
       if (!Number.isFinite(frame.time) || frame.time > position || position - frame.time >= .25 || frame.time <= this.lastSample || frame.pcm.length !== 1152) continue;
@@ -45,23 +47,10 @@ export class MpcAutoDirector {
     const rms = Math.sqrt(power / pcm.length);
     if (rms > .004) this.audible = position;
     this.energy += (Math.min(1, rms * 4) - this.energy) * (1 - Math.exp(-dt / .539));
-    // Normalize only the scheduler detector, preserving preset audio and quiet-track transients.
-    this.level += (rms - this.level) * (1 - Math.exp(-dt / 1.317));
-    const gain = Math.min(8, .3 / Math.max(.02, this.level));
-    const analysisPcm = pcm.map(value => Math.max(-1, Math.min(1, value * gain)));
-    const audio = this.analyser.analyse({ left: analysisPcm.subarray(0, 576), right: analysisPcm.subarray(576) });
-    // Ignore repeated high-level triggers on a sustained/decaying sound.
-    let bandRise = 0;
-    for (let band = 0; band < 16; band++) {
-      let value = 0;
-      for (let bin = band * 32; bin < (band + 1) * 32; bin++) value += Math.max(audio.spectrum[0][bin]!, audio.spectrum[1][bin]!) / (32 * 255);
-      if (band > 0) bandRise = Math.max(bandRise, value - this.bands[band]!); this.bands[band] = value;
-    }
-    // Independent band transients survive steady bass masking overall RMS changes.
-    const onset = audio.beat && rms > this.previousRms * 1.2 || bandRise > .035;
-    if (onset && position - this.onset >= .22 && rms > .008) { this.onset = position; this.tempo.addOnset(position); }
-    this.previousRms = rms;
+    const estimate = this.estimator.push(position, pcm);
+    if (estimate) this.tempo.observeTempo(position, estimate.bpm, estimate.confidence, estimate.anchor);
   }
+
   /** Public for deterministic scheduler checks independent of audio estimation. */
   grid(bar: number, trusted: boolean) {
     if (!this.enabled || !trusted) { this.rearm(); return { prepare: false, switch: false }; }

@@ -8,7 +8,7 @@
     "build": "node tools/build-mpc.mjs",
     "build:mpc": "node tools/build-mpc.mjs",
     "typecheck": "tsc --noEmit",
-    "check": "npm run typecheck && node tools/check-mpc-navigation.mjs && node tools/check-mpc-auto.mjs && node tools/check-mpc-host.mjs && node tools/check-mpc-audio-batch.mjs && node tools/check-mpc-safety.mjs && node tools/check-mpc-security.mjs && node tools/check-mpc-spectrum.mjs",
+    "check": "npm run typecheck && node tools/check-mpc-navigation.mjs && node tools/check-mpc-auto.mjs && node tools/check-mpc-host.mjs && node tools/check-mpc-audio-batch.mjs && node tools/check-mpc-safety.mjs && node tools/check-mpc-security.mjs && node tools/check-mpc-spectrum.mjs && node tools/check-mpc-clock.mjs",
     "check:local-catalog": "node tools/check-mpc-catalog.mjs"
   },
   "devDependencies": {

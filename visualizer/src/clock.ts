@@ -104,6 +104,7 @@ export type DivisionName = keyof typeof DIVISIONS;
 
 /** Deterministic onset-driven tempo tracker running entirely on audio time. */
 export class TempoTracker {
+  constructor(private readonly continuity: { coastBeats?: number; recency?: number; tempoGain?: number; changeEvidence?: number } = {}) {}
   private onsets: number[] = [];
   /** Detector/output delay in audio-clock seconds, never wall-clock time. */
   inputLatency = 0;
@@ -177,6 +178,26 @@ export class TempoTracker {
     }
   }
 
+  /** Accept a tempo measured over a rolling audio window, rather than an onset
+   * interval. Require repeated agreement before acquiring or replacing a grid. */
+  observeTempo(t: number, bpm: number, confidence: number, anchor: number): void {
+    if (![t,bpm,confidence,anchor].every(Number.isFinite) || bpm < MIN_BPM || bpm > MAX_BPM || confidence < .3) return;
+    if (Math.abs(bpm - this.pendingBpm) <= 2) this.pendingCount++;
+    else { this.pendingBpm = bpm; this.pendingCount = 1; }
+    const change = this.bpm && Math.abs(bpm - this.bpm) > Math.max(3,this.bpm*.04);
+    if (this.locked && change && this.pendingCount < (this.continuity.changeEvidence ?? 8)) return;
+    if (!this.locked && this.pendingCount < 3) { this.bpm=bpm; return; }
+    this.bpm = !this.locked || change ? bpm : this.bpm + (bpm-this.bpm)*(this.continuity.tempoGain ?? .12);
+    this.confidence = confidence; this.lastOnsetTime=t;
+    const period=60/this.bpm;
+    const next=anchor+(Math.floor((t-anchor)/period)+1)*period;
+    if (!this.locked) { this.locked=true; this.nextBeat=next; }
+    else {
+      const error=wrapSigned(next-this.nextBeat,period);
+      if (Math.abs(error)<period*.25) this.nextBeat += Math.max(-.02,Math.min(.02,error))*.2;
+    }
+  }
+
   private score(): void {
     let best = 0, bestScore = -1, runnerUp = 0;
     const scores: Array<{ bpm: number; score: number }> = [];
@@ -236,12 +257,12 @@ export class TempoTracker {
       if (largeChange) {
         if (Math.abs(best - this.pendingBpm) <= 2) this.pendingCount++;
         else { this.pendingBpm = best; this.pendingCount = 1; }
-        if (!this.locked || this.pendingCount >= 3) {
+        if (!this.locked || this.pendingCount >= (this.continuity.changeEvidence ?? 3)) {
           this.bpm = best; this.pendingBpm = 0; this.pendingCount = 0;
         }
       } else {
         this.pendingBpm = 0; this.pendingCount = 0;
-        const gain = this.locked ? 0.42 : 0.52;
+        const gain = this.locked ? (this.continuity.tempoGain ?? 0.42) : 0.52;
         this.bpm += (best - this.bpm) * gain;
       }
     }
@@ -264,7 +285,7 @@ export class TempoTracker {
     const count = this.onsets.length;
     for (let index = 1; index < count; index++) {
       const age = count - 1 - index;
-      const recency = Math.pow(0.75, age);
+      const recency = Math.pow(this.continuity.recency ?? 0.75, age);
       const dt = this.onsets[index]! - this.onsets[index - 1]!;
       const beats = Math.max(1, Math.round(dt / period));
       const residual = Math.abs(dt - beats * period) / period;
@@ -285,7 +306,7 @@ export class TempoTracker {
     }
     for (let index = 0; index < count; index++) for (let distance = 2; distance <= MAX_LOOKAHEAD; distance++) {
       const next = index + distance; if (next >= count) break;
-      const age = count - 1 - next, pairWeight = Math.pow(0.75, age) / distance;
+      const age = count - 1 - next, pairWeight = Math.pow(this.continuity.recency ?? 0.75, age) / distance;
       const dt = this.onsets[next]! - this.onsets[index]!;
       const beats = Math.max(1, Math.round(dt / period));
       const residual = Math.abs(dt - beats * period) / period;
@@ -302,7 +323,7 @@ export class TempoTracker {
     if (!Number.isFinite(now)) return;
     if (this.locked && this.bpm && Number.isFinite(this.lastOnsetTime)) {
       const period = 60 / this.bpm;
-      const timeout = Math.max(2.5, period * 4);
+      const timeout = Math.max(2.5, period * (this.continuity.coastBeats ?? 4));
       const silentFor = now - this.lastOnsetTime;
       if (silentFor > timeout) {
         this.confidence = Math.min(this.confidence, Math.max(0, 1 - (silentFor - timeout) / timeout));
