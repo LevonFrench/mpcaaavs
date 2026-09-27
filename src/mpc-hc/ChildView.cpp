@@ -136,7 +136,7 @@ void CChildView::OnTimer(UINT_PTR id)
 {
     if (id == 0xAA01) {
         const bool visible = m_pMainFrame->GetLoadState() == MLS::LOADED && m_pMainFrame->m_fAudioOnly;
-        m_aaavs.Tick(m_hWnd, visible, visible && m_pMainFrame->GetMediaState() == State_Running, visible ? m_pMainFrame->GetPos() : 0);
+        m_aaavs.Tick(m_hWnd, visible, visible && m_pMainFrame->GetMediaState() == State_Running, visible ? m_pMainFrame->GetAAAVSPosition() : 0);
     } else __super::OnTimer(id);
 }
 

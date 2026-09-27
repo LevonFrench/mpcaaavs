@@ -2,9 +2,19 @@
 
 An experimental fork of [MPC-HC](https://github.com/clsid2/mpc-hc) that places the AAAVS music visualizer in the player's album-art area.
 
-The native toolbar adds **previous preset**, **next preset**, and **preset shuffle** beside the playback controls, using MPC-HC's existing themed icons. Track controls keep their usual behavior. Previous walks actual preset history; shuffle changes the next-preset selection and does not advance on a timer.
+The native toolbar adds **previous preset**, **next preset**, **preset shuffle**, and **Auto** beside the playback controls, using MPC-HC's existing themed icons. Track controls keep their usual behavior. Previous walks actual preset history; shuffle chooses random or sequential selection for both manual and automatic switching. Right-click Auto for phrase and transition options.
 
-**Source prototype — no runnable release is available yet.** The embedded renderer bundle, TypeScript checks, navigation tests, native PCM unit test, and standalone WebView2 bridge compilation pass locally. The complete Windows player has not been built or tested. MFC/ATL and upstream third-party dependencies are missing in the development environment. CI checks source only, not native playback or GPU rendering.
+**Experimental developer build — not a public binary release.** The Windows x64 Release Lite player now compiles successfully with Visual Studio 2022 v143, MFC/ATL, Windows SDK 10, NASM and Yasm. Local UI checks confirmed embedded visualization, previous/next preset selection, shuffle across the full collection and pause. The embedded renderer bundle, TypeScript checks, navigation tests and native PCM unit test also pass. CI checks source only, not native playback or GPU rendering.
+
+## Musical auto switching and AVS transitions
+
+Auto defaults to adaptive 2–12-bar holds. Fixed 2, 4, 8, and 12 bars are available. The AAAVS transient detector and tempo tracker follow the live playback clock, with analysis-only normalization for quieter audio; switching waits for a trusted tempo and inferred four-beat bar boundary. These are inferred bars, not song-structure or time-signature recognition. Silence, pauses, seeks, and lost tempo lock rearm or hold the scheduler instead of triggering wall-clock switches.
+
+The next preset is prepared one bar early. The current preset continues rendering while it loads; failed candidates are skipped for the session. Manual selections restart the phrase countdown. At most two preset workers are retained.
+
+All 14 classic AVS transition styles are available, plus random and cut. Default is a two-second cross dissolve; optional 1-, 2-, or 4-beat duration uses the tempo at transition start (two-second fallback without a lock). The outgoing preset can keep animating, or freeze to reduce rendering work. Options currently last for the player session. The flash limiter applies after compositing. This is behavioral emulation, not a claim of pixel-identical Winamp output.
+
+See [transition implementation notes](docs/AVS-TRANSITIONS.md) and the [upstream notice](THIRD-PARTY-AVS-TRANSITIONS.txt). Automated checks cover phrase scheduling, synthetic pulse tempo lock, and transition geometry/endpoints; real-song musical alignment remains a listening-test requirement.
 
 ## Architecture
 
@@ -15,7 +25,7 @@ The native toolbar adds **previous preset**, **next preset**, and **preset shuff
 - Video playback retains the original renderer. Failed visualization falls back to artwork.
 - The fork uses a separate executable name, settings location and window class.
 
-These integration behaviors still require end-to-end Windows validation, including sync, resize, fullscreen, toolbar appearance and failure recovery. AudioSwitcher must be enabled; bitstream passthrough provides no PCM. Multichannel analysis currently uses the first two channels.
+Broader Windows validation remains: measured audio/visual sync, resize/DPI/fullscreen, video transitions and failure recovery. AudioSwitcher must be enabled; bitstream passthrough provides no PCM. Multichannel analysis currently uses the first two channels.
 
 ## Presets
 
@@ -33,7 +43,7 @@ The host lazily loads every catalog entry and integrity-checks preset bytes. Pac
 
 Windows x64 is the initial target. Follow [MPC-HC's native build prerequisites](docs/Compilation.md), including Visual Studio 2022 C++ with v143 MFC/ATL and the appropriate Windows SDK. Restore upstream source dependencies with `git submodule update --init --recursive`.
 
-Run `tools/prepare-aaavs.ps1` from PowerShell to download the pinned Microsoft WebView2 SDK and install/build the JavaScript dependencies. This does not install Visual Studio components or the WebView2 Runtime.
+Run `tools/prepare-aaavs.ps1` from PowerShell to download the pinned Microsoft WebView2 SDK, NASM and Yasm, then install/build the JavaScript dependencies. This does not install Visual Studio components or the WebView2 Runtime.
 
 For source checks, enter the `visualizer` directory and run:
 
@@ -45,7 +55,7 @@ npm run build
 
 The public renderer build deliberately does not embed preset or bitmap packs. With your local collection present, run `npm run check:local-catalog` to verify the entire catalog.
 
-Run `python tools/build-native.py` for the x64 **Release Lite developer build**, then `tools/stage-aaavs.ps1` to stage the visualizer and local collection alongside `mpc-aaavs.exe`. Lite omits internal LAV codecs; a release needs the full upstream codec build. WebView2 Runtime must be available on the target machine. The staging tool is for local use, not a public redistribution package.
+Run `python tools/build-native.py` for the x64 **Release Lite developer build**, then `tools/stage-aaavs.ps1` to stage the visualizer and local collection alongside `mpc-aaavs.exe`. Double-click `start-mpc-aaavs.cmd` to launch a completed local build. Lite omits internal LAV codecs and uses installed DirectShow codecs (such as K-Lite); a self-contained release needs the full upstream codec build. WebView2 Runtime must be available on the target machine. The staging tool is for local use, not a public redistribution package. On the development machine, the required DirectX support DLL and optional MediaInfo/icon DLLs were copied locally from the existing K-Lite installation, which was left unchanged; these DLLs are not in this repository.
 
 ## Provenance and license
 

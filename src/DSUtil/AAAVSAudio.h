@@ -1,5 +1,8 @@
 // MPC-AAAVS: bounded, process-local PCM tap. Never blocks the audio thread.
 #pragma once
+#include <mmreg.h>
+#include <ks.h>
+#include <ksmedia.h>
 #include <array>
 #include <mutex>
 #include <cmath>

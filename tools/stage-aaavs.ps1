@@ -23,4 +23,5 @@ foreach ($name in @('README.md', 'SOURCES.md', 'COLLECTION_LOG.md')) {
     Copy-Item -LiteralPath (Join-Path $collection $name) -Destination $targetCollection -Force
 }
 Copy-Item -LiteralPath (Join-Path $appRoot 'COPYING.txt') -Destination $PlayerDirectory
+Copy-Item -LiteralPath (Join-Path $appRoot 'THIRD-PARTY-AVS-TRANSITIONS.txt') -Destination $PlayerDirectory -Force
 Write-Output "Staged AAAVS beside $player"

@@ -79,6 +79,7 @@ std::map<WORD, CPlayerToolBar::svgButtonInfo> CPlayerToolBar::supportedSvgButton
     {ID_AAAVS_PREVIOUS, {TBBS_BUTTON, 3}},
     {ID_AAAVS_NEXT, {TBBS_BUTTON, 4}},
     {ID_AAAVS_SHUFFLE, {TBBS_CHECKBOX, 14}},
+    {ID_AAAVS_AUTO, {TBBS_CHECKBOX, 15}},
     {ID_PLAY_PLAY, {TBBS_CHECKGROUP, 0}},
     {ID_PLAY_PAUSE, {TBBS_CHECKGROUP, 1}},
     {ID_PLAY_STOP, {TBBS_CHECKGROUP, 2}},
@@ -370,6 +371,7 @@ void CPlayerToolBar::LoadButtonStrings() {
             }
             if (it.first == ID_AAAVS_PREVIOUS) it.second.text = L"Previous AAAVS preset";
             else if (it.first == ID_AAAVS_NEXT) it.second.text = L"Next AAAVS preset";
+            else if (it.first == ID_AAAVS_AUTO) it.second.text = L"Auto AAAVS (right-click for options)";
             else if (it.first == ID_AAAVS_SHUFFLE) it.second.text = L"Shuffle AAAVS presets";
             else it.second.text.LoadStringW(dwname);
             supportedSvgButtonsSeq.push_back(it.first);
@@ -499,8 +501,8 @@ void CPlayerToolBar::PlaceButtons(bool loadSavedLayout) {
     }
 
     // Keep preset controls adjacent to transport, including restored layouts.
-    for (int id : {ID_AAAVS_PREVIOUS, ID_AAAVS_NEXT, ID_AAAVS_SHUFFLE}) {
-        if (tb.CommandToIndex(id) < 0) addButton(id);
+    for (int id : {ID_AAAVS_PREVIOUS, ID_AAAVS_NEXT, ID_AAAVS_SHUFFLE, ID_AAAVS_AUTO}) {
+        if (tb.CommandToIndex(id) == static_cast<UINT>(-1)) addButton(id);
     }
     addButton(ID_DUMMYSEPARATOR);
     addButton(ID_VOLUME_MUTE);
@@ -1168,9 +1170,9 @@ BOOL CPlayerToolBar::OnToolTipNotify(UINT id, NMHDR* pNMHDR, LRESULT* pResult)
     } else {
         nID = (int)pNMHDR->idFrom;
     }
-    if (nID >= ID_AAAVS_PREVIOUS && nID <= ID_AAAVS_SHUFFLE) {
+    if (nID >= ID_AAAVS_PREVIOUS && nID <= ID_AAAVS_AUTO) {
         static CString tip;
-        tip = nID == ID_AAAVS_PREVIOUS ? L"Previous AAAVS preset" : nID == ID_AAAVS_NEXT ? L"Next AAAVS preset" : L"Shuffle AAAVS presets";
+        tip = nID == ID_AAAVS_PREVIOUS ? L"Previous AAAVS preset" : nID == ID_AAAVS_NEXT ? L"Next AAAVS preset" : nID == ID_AAAVS_AUTO ? L"Auto AAAVS (right-click: phrases and AVS transitions)" : L"Shuffle AAAVS presets";
         pTTT->lpszText = const_cast<LPWSTR>(static_cast<LPCWSTR>(tip));
         *pResult = 0;
         return TRUE;
@@ -1270,6 +1272,9 @@ void CPlayerToolBar::OnRButtonUp(UINT nFlags, CPoint point) {
         UINT messageId = 0;
 
         switch (itemId) {
+            case ID_AAAVS_AUTO:
+                messageId = ID_AAAVS_OPTIONS;
+                break;
             case ID_PLAY_PLAY:
                 messageId = ID_FILE_OPENMEDIA;
                 break;

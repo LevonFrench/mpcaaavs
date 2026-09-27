@@ -23,6 +23,16 @@ static std::wstring ProgramFolder() {
 struct AAAVSView::State {
     HWND parent = nullptr;
     bool started = false, closed = false, visible = false, ready = false, failed = false, shuffle = false, pending = false;
+    bool automatic = true, keepOld = true;
+    int bars = 0, transition = 1, beats = 0;
+    void Settings() {
+        if (!web) return;
+        std::wostringstream json;
+        json << L"{\"type\":\"settings\",\"enabled\":" << (automatic ? L"true" : L"false")
+             << L",\"bars\":" << bars << L",\"transition\":" << transition << L",\"beats\":" << beats
+             << L",\"keepOld\":" << (keepOld ? L"true" : L"false") << L"}";
+        web->PostWebMessageAsJson(json.str().c_str());
+    }
     ULONGLONG sent = 0;
     ComPtr<ICoreWebView2Controller> controller;
     ComPtr<ICoreWebView2> web;
@@ -31,6 +41,7 @@ AAAVSView::AAAVSView() : state(std::make_shared<State>()) {}
 AAAVSView::~AAAVSView() { Close(); }
 bool AAAVSView::Ready() const { return state->ready && state->visible; }
 bool AAAVSView::Shuffle() const { return state->shuffle; }
+bool AAAVSView::Automatic() const { return state->automatic; }
 void AAAVSView::Close() {
     state->closed = true;
     state->ready = false;
@@ -46,6 +57,8 @@ void AAAVSView::Resize() {
 }
 void AAAVSView::Command(UINT command) {
     if (!Ready()) return;
+    if (command == ID_AAAVS_OPTIONS) { Options(); return; }
+    if (command == ID_AAAVS_AUTO) { state->automatic = !state->automatic; state->Settings(); return; }
     if (command == ID_AAAVS_SHUFFLE) {
         state->shuffle = !state->shuffle;
         state->web->PostWebMessageAsJson(state->shuffle ? L"{\"type\":\"shuffle\",\"enabled\":true}" : L"{\"type\":\"shuffle\",\"enabled\":false}");
@@ -99,6 +112,7 @@ void AAAVSView::Tick(HWND parent, bool visible, bool playing, LONGLONG position)
                             LPWSTR message = nullptr;
                             if (SUCCEEDED(args->TryGetWebMessageAsString(&message)) && message) {
                                 if (wcscmp(message, L"ready") == 0) { s->ready = true; s->failed = false; s->controller->put_IsVisible(s->visible); }
+                                if (wcscmp(message, L"host-ready") == 0) s->Settings();
                                 if (wcscmp(message, L"ack") == 0) s->pending = false;
                                 if (wcscmp(message, L"play-pause") == 0) ::PostMessage(GetParent(s->parent), WM_COMMAND, ID_PLAY_PLAYPAUSE, 0);
                                 if (wcscmp(message, L"fullscreen") == 0) ::PostMessage(GetParent(s->parent), WM_COMMAND, ID_VIEW_FULLSCREEN, 0);
@@ -119,11 +133,38 @@ void AAAVSView::Tick(HWND parent, bool visible, bool playing, LONGLONG position)
     auto frame = AAAVS::Tap().Read(position);
     std::wostringstream json;
     json.imbue(std::locale::classic());
-    json.precision(5);
+    json.precision(10);
     json << L"{\"type\":\"audio\",\"playing\":" << (visible && playing ? L"true" : L"false")
          << L",\"position\":" << position / 10000000.0 << L",\"epoch\":" << frame.epoch << L",\"pcm\":[";
     for (size_t i = 0; i < frame.pcm.size(); ++i) { if (i) json << L','; json << (visible && playing ? frame.pcm[i] : 0); }
     json << L"]}";
     s->pending = SUCCEEDED(s->web->PostWebMessageAsJson(json.str().c_str()));
     s->sent = GetTickCount64();
+}
+
+void AAAVSView::Options() {
+    if (!Ready()) return;
+    HMENU menu = CreatePopupMenu(), phrases = CreatePopupMenu(), effects = CreatePopupMenu(), durations = CreatePopupMenu();
+    const int bars[] = {0, 2, 4, 8, 12};
+    const wchar_t* phraseNames[] = {L"Adaptive (2-12 bars)", L"2 bars", L"4 bars", L"8 bars", L"12 bars"};
+    for (int i = 0; i < 5; ++i) AppendMenuW(phrases, MF_STRING | (state->bars == bars[i] ? MF_CHECKED : 0), 1 + i, phraseNames[i]);
+    const wchar_t* names[] = {L"Random", L"Cross dissolve", L"L/R Push", L"R/L Push", L"T/B Push", L"B/T Push", L"9 Random Blocks", L"Split L/R Push", L"L/R to Center Push", L"L/R to Center Squeeze", L"L/R Wipe", L"R/L Wipe", L"T/B Wipe", L"B/T Wipe", L"Dot Dissolve", L"Cut"};
+    for (int i = 0; i < 16; ++i) AppendMenuW(effects, MF_STRING | (state->transition == i ? MF_CHECKED : 0), 20 + i, names[i]);
+    const int beats[] = {0, 1, 2, 4};
+    const wchar_t* durationsText[] = {L"Classic (2 seconds)", L"1 beat", L"2 beats", L"4 beats"};
+    for (int i = 0; i < 4; ++i) AppendMenuW(durations, MF_STRING | (state->beats == beats[i] ? MF_CHECKED : 0), 40 + i, durationsText[i]);
+    AppendMenuW(menu, MF_STRING | (state->automatic ? MF_CHECKED : 0), 50, L"Automatic preset switching");
+    AppendMenuW(menu, MF_POPUP, (UINT_PTR)phrases, L"Phrase length");
+    AppendMenuW(menu, MF_POPUP, (UINT_PTR)effects, L"AVS transition");
+    AppendMenuW(menu, MF_POPUP, (UINT_PTR)durations, L"Transition duration");
+    AppendMenuW(menu, MF_STRING | (state->keepOld ? MF_CHECKED : 0), 51, L"Keep outgoing preset animating");
+    POINT point; GetCursorPos(&point);
+    const UINT choice = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, point.x, point.y, 0, GetParent(state->parent), nullptr);
+    DestroyMenu(menu);
+    if (choice >= 1 && choice <= 5) state->bars = bars[choice - 1];
+    if (choice >= 20 && choice <= 35) state->transition = choice - 20;
+    if (choice >= 40 && choice <= 43) state->beats = beats[choice - 40];
+    if (choice == 50) state->automatic = !state->automatic;
+    if (choice == 51) state->keepOld = !state->keepOld;
+    if (choice) state->Settings();
 }

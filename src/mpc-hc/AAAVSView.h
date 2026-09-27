@@ -14,4 +14,6 @@ public:
     void Command(UINT command);
     bool Ready() const;
     bool Shuffle() const;
+    bool Automatic() const;
+    void Options();
 };

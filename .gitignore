@@ -51,6 +51,8 @@ ipch
 /visualizer/*.log
 /.public-check/
 /.npm-cache/
+/.tmp/
+/dependencies-restore.log
 /distrib/MPCVR/
 /distrib/x64/MediaInfo.dll
 /distrib/x86/MediaInfo.dll

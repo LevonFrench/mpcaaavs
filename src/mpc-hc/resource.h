@@ -5,6 +5,8 @@
 #define ID_AAAVS_PREVIOUS 31000
 #define ID_AAAVS_NEXT 31001
 #define ID_AAAVS_SHUFFLE 31002
+#define ID_AAAVS_AUTO 31003
+#define ID_AAAVS_OPTIONS 31004
 #define IDR_MAINFRAME                   128
 #define IDR_POPUP                       130
 #define IDR_POPUPMAIN                   133

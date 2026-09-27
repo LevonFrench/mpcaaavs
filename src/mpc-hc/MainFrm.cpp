@@ -352,8 +352,8 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
     ON_UPDATE_COMMAND_UI(ID_FILE_OPENMEDIA, OnUpdateFileOpen)
     ON_COMMAND(ID_FILE_OPENMEDIA, OnFileOpenmedia)
     ON_UPDATE_COMMAND_UI(ID_FILE_OPENMEDIA, OnUpdateFileOpen)
-    ON_COMMAND_RANGE(ID_AAAVS_PREVIOUS, ID_AAAVS_SHUFFLE, OnAAAVSPreset)
-    ON_UPDATE_COMMAND_UI_RANGE(ID_AAAVS_PREVIOUS, ID_AAAVS_SHUFFLE, OnUpdateAAAVSPreset)
+    ON_COMMAND_RANGE(ID_AAAVS_PREVIOUS, ID_AAAVS_OPTIONS, OnAAAVSPreset)
+    ON_UPDATE_COMMAND_UI_RANGE(ID_AAAVS_PREVIOUS, ID_AAAVS_OPTIONS, OnUpdateAAAVSPreset)
     ON_WM_COPYDATA()
     ON_COMMAND(ID_FILE_OPENDVDBD, OnFileOpendvd)
     ON_UPDATE_COMMAND_UI(ID_FILE_OPENDVDBD, OnUpdateFileOpen)
@@ -19935,6 +19935,14 @@ int CMainFrame::GetCurrentSubtitleTrackIdx(CString *pstrName)
     return -1;
 }
 
+REFERENCE_TIME CMainFrame::GetAAAVSPosition() const
+{
+    // The seek bar caches a slower UI timer; beat analysis needs the live graph clock.
+    REFERENCE_TIME position = 0;
+    if (GetLoadState() == MLS::LOADED && m_pMS && SUCCEEDED(m_pMS->GetCurrentPosition(&position))) return position;
+    return GetPos();
+}
+
 REFERENCE_TIME CMainFrame::GetPos() const
 {
     return (GetLoadState() == MLS::LOADED ? m_wndSeekBar.GetPos() : 0);
@@ -25437,4 +25445,5 @@ void CMainFrame::OnAAAVSPreset(UINT id) { m_wndView.m_aaavs.Command(id); }
 void CMainFrame::OnUpdateAAAVSPreset(CCmdUI* ui) {
     ui->Enable(m_wndView.m_aaavs.Ready());
     if (ui->m_nID == ID_AAAVS_SHUFFLE) ui->SetCheck(m_wndView.m_aaavs.Shuffle());
+    if (ui->m_nID == ID_AAAVS_AUTO) ui->SetCheck(m_wndView.m_aaavs.Automatic());
 }

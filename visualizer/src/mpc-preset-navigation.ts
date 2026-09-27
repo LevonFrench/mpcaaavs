@@ -6,6 +6,12 @@ export class PresetNavigation {
   constructor(readonly count: number, private random = Math.random) {
     if (count < 1) throw new Error('Preset catalog is empty');
   }
+  select(index: number): number {
+    if (index === this.index) return index;
+    this.history.push(this.index);
+    if (this.history.length > 256) this.history.shift();
+    this.index = index; return index;
+  }
   next(): number {
     this.history.push(this.index);
     if (this.history.length > 256) this.history.shift();
