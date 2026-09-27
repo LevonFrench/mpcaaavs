@@ -31,7 +31,7 @@
 // below, or <exe-basename>.ini next to the executable in portable mode. Only
 // MediaHistory is relocated, into <exe-basename>.history.ini (portable mode).
 // ---------------------------------------------------------------------------
-static const wchar_t* const REG_KEY            = L"Software\\MPC-HC\\MPC-HC"; // HKCU settings key
+static const wchar_t* const REG_KEY            = L"Software\\MPC-AAAVS\\MPC-AAAVS"; // Separate app settings
 static const wchar_t* const INI_SUFFIX         = L".ini";                     // <exe-basename>.ini (portable)
 static const wchar_t* const HISTORY_INI_SUFFIX = L".history.ini";            // <exe-basename>.history.ini
 

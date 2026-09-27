@@ -1155,7 +1155,7 @@ bool CMPlayerCApp::GetAppDataPath(CString& path)
         return false;
     }
     CLongPath p;
-    p.Combine(path, _T("MPC-HC"));
+    p.Combine(path, _T("MPC-AAAVS"));
     path = (LPCTSTR)p;
 
     return true;

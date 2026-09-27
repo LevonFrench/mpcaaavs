@@ -1,0 +1,200 @@
+/* The step grid.
+ *
+ * Companion to `grid.ts`, injected as a <link> the way `input.css` and `ui.css`
+ * are. The palette is the live-input panel's, deliberately: they are two halves
+ * of the same control surface and three sets of "nearly the same dark grey"
+ * would read as three applications sharing a window.
+ *
+ * Bottom-centre, so it clears the layer panel (top-right), the HUD (top-left),
+ * the live-input panel (bottom-left) and the offline launcher (bottom-right).
+ */
+
+#aaavs-seq {
+  --sq-fg: var(--fg, #e9e9f2);
+  --sq-dim: var(--dim, #8a8aa0);
+  --sq-line: var(--line, rgba(255, 255, 255, .12));
+  --sq-accent: var(--accent, #ff3d81);
+  --sq-ok: #42d8ee;
+  --sq-panel: rgba(8, 9, 16, .94);
+  --sq-sunk: rgba(255, 255, 255, .035);
+
+  position: fixed;
+  left: 50%;
+  bottom: 1.25rem;
+  transform: translateX(-50%);
+  z-index: 15;
+  width: min(46rem, calc(100vw - 2.5rem));
+  max-height: calc(100vh - 8rem);
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+
+  border: 1px solid var(--sq-line);
+  border-radius: 12px;
+  background: var(--sq-panel);
+  backdrop-filter: blur(10px);
+  color: var(--sq-fg);
+  font: 12px/1.45 ui-monospace, "Cascadia Mono", Menlo, Consolas, monospace;
+}
+
+#aaavs-seq[hidden] { display: none; }
+
+#aaavs-seq h2 { margin: 0; padding: 0; }
+
+#aaavs-seq :focus-visible {
+  outline: 2px solid var(--sq-accent);
+  outline-offset: 1px;
+}
+
+/* ---------------------------------------------------------------- header */
+
+.sq-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .65rem .75rem .6rem;
+  border-bottom: 1px solid var(--sq-line);
+}
+
+.sq-title {
+  flex: 1 1 auto;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .18em;
+  color: var(--sq-fg);
+}
+
+.sq-x {
+  padding: 0 .45rem;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: var(--sq-dim);
+  font: inherit;
+  cursor: pointer;
+}
+
+.sq-x:hover { color: var(--sq-fg); border-color: var(--sq-line); }
+
+/* ---------------------------------------------------------------- rows */
+
+.sq-body {
+  flex: 1 1 auto;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: .3rem;
+  padding: .6rem .75rem .75rem;
+}
+
+.sq-row {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+}
+
+.sq-row-head {
+  flex: 0 0 11rem;
+  min-width: 0;
+}
+
+.sq-row-tail {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: .35rem;
+}
+
+.sq-select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: .25rem .35rem;
+  border: 1px solid var(--sq-line);
+  border-radius: 4px;
+  background: var(--sq-sunk);
+  color: var(--sq-fg);
+  font: inherit;
+  font-size: 11px;
+}
+
+/* A native-lane-only target while an AVS preset plays: disabled in the list,
+   and when a lane already points at one, the select itself says it is dead. */
+.sq-select option:disabled { color: var(--sq-dim); }
+.sq-select.is-inert { color: var(--sq-dim); border-style: dashed; }
+
+.sq-grid {
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: repeat(16, 1fr);
+  gap: .2rem;
+  min-width: 0;
+}
+
+/* ---------------------------------------------------------------- cells */
+
+.sq-cell {
+  aspect-ratio: 1;
+  min-width: 0;
+  padding: 0;
+  border: 1px solid var(--sq-line);
+  border-radius: 3px;
+  background: var(--sq-sunk);
+  cursor: pointer;
+}
+
+/* The quarter-note columns, so sixteen identical squares still read as a bar. */
+.sq-cell.is-beat { border-color: rgba(255, 255, 255, .22); }
+
+.sq-cell.is-on { background: var(--sq-accent); border-color: var(--sq-accent); }
+
+.sq-cell:hover:not(.is-on) { border-color: var(--sq-accent); }
+
+/* The playhead is an outline rather than a fill, so it stays legible on top of
+ * an already-lit step — which is the case that matters. */
+.sq-cell.is-now {
+  outline: 2px solid var(--sq-ok);
+  outline-offset: -1px;
+}
+
+.sq-row.is-ruler .sq-grid { gap: .2rem; }
+
+.sq-tick {
+  text-align: center;
+  color: var(--sq-dim);
+  font-size: 9px;
+  letter-spacing: 0;
+}
+
+.sq-tick.is-beat { color: var(--sq-fg); }
+
+/* ---------------------------------------------------------------- controls */
+
+.sq-amount {
+  width: 4.5rem;
+  accent-color: var(--sq-accent);
+}
+
+.sq-btn {
+  flex: 0 0 auto;
+  padding: .3rem .5rem;
+  border: 1px solid var(--sq-line);
+  border-radius: 4px;
+  background: var(--sq-sunk);
+  color: var(--sq-fg);
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: .1em;
+  cursor: pointer;
+}
+
+.sq-btn:hover:not(:disabled) { border-color: var(--sq-accent); }
+
+.sq-btn.is-primary {
+  border-color: var(--sq-accent);
+  background: var(--sq-accent);
+  color: #0b0b14;
+  font-weight: 600;
+}
+
+.sq-btn.is-icon { width: 1.6rem; padding: .3rem 0; text-align: center; }

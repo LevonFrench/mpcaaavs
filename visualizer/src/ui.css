@@ -1,0 +1,589 @@
+/* The layer stack panel (Phase 3).
+ *
+ * Companion to `ui.ts`, which injects a <link> to this file rather than
+ * inlining a style string. Keeping it a real stylesheet means the panel can be
+ * restyled without a rebuild, and it keeps ~400 lines of CSS out of the JS
+ * bundle that the render loop has to be parsed alongside.
+ *
+ * The palette is lifted from index.html on purpose — the panel and the page
+ * must agree, and two sets of "nearly the same dark grey" reads as a bug.
+ * Everything here is scoped under #aaavs-ui so it cannot leak onto the canvas,
+ * the HUD or the hint pill.
+ *
+ * What this file deliberately does NOT do: animate anything with
+ * `transition: all` (which animates properties nobody chose, including layout),
+ * remove a focus outline without replacing it, or assume the panel is the only
+ * thing on screen. It is an instrument bolted to the side of a picture, and the
+ * picture wins every contest for attention.
+ */
+
+#aaavs-ui {
+  /* Fallbacks, so the panel is legible even if index.html's :root block is
+     ever trimmed. The values are the same ones. */
+  --ui-fg: var(--fg, #e9e9f2);
+  --ui-dim: var(--dim, #8a8aa0);
+  --ui-line: var(--line, rgba(255, 255, 255, .12));
+  --ui-accent: var(--accent, #ff3d81);
+  --ui-panel: rgba(8, 9, 16, .94);
+  --ui-sunk: rgba(255, 255, 255, .035);
+  --ui-raised: rgba(255, 255, 255, .07);
+  --ui-solo: #ffd166;
+  --ui-warn: #ffd166;
+
+  position: fixed;
+  top: 1.25rem;
+  right: 1.25rem;
+  z-index: 10;
+  width: min(62rem, calc(100vw - 2.5rem));
+  max-height: calc(100vh - 2.5rem);
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+
+  border: 1px solid var(--ui-line);
+  border-radius: 12px;
+  background: var(--ui-panel);
+  backdrop-filter: blur(10px);
+  color: var(--ui-fg);
+  font: 12px/1.45 ui-monospace, "Cascadia Mono", Menlo, Consolas, monospace;
+}
+
+/* index.html's global reset is `box-sizing` and nothing else, so every element
+   here still carries its UA margins. An <h2> at 1.5em with 0.83em of margin
+   above and below it breaks the header row outright, and a <p class="ui-status">
+   pushes the panel a whole line taller the moment it has something to say. Reset
+   at the block level rather than per-class: the next element added to this panel
+   should not have to remember. */
+#aaavs-ui h2,
+#aaavs-ui p,
+#aaavs-ui dl,
+#aaavs-ui dt,
+#aaavs-ui dd,
+#aaavs-ui ul {
+  margin: 0;
+  padding: 0;
+}
+
+/* ---------------------------------------------------------------- header */
+
+.ui-head {
+  /* Never shrinks and never scrolls away: the collapse button has to stay
+     reachable when the body is taller than the viewport. */
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: .65rem;
+  padding: .65rem .75rem .6rem;
+}
+
+.ui-head + * { border-top: 1px solid var(--ui-line); }
+
+.ui-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* An <h2> for the outline, not for the typography — this panel is chrome, and
+     18px bold next to 12px monospace reads as a different application. */
+  display: flex;
+  align-items: baseline;
+  gap: .5rem;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ui-fg);
+}
+.ui-title b { font-weight: 700; letter-spacing: -.02em; }
+.ui-title span { color: var(--ui-dim); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
+
+/* ---------------------------------------------------------------- body */
+
+.ui-body {
+  /* `min-height: 0` is the load-bearing half. A flex item's default
+     `min-height: auto` refuses to shrink below its content, so `overflow-y`
+     never engages and a twelve-layer stack runs straight off the bottom of the
+     screen past the panel's own max-height. */
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.ui-body[hidden] { display: none; }
+
+.ui-section {
+  padding: .7rem .75rem;
+  border-bottom: 1px solid var(--ui-line);
+}
+.ui-section:last-child { border-bottom: 0; }
+
+.ui-legend {
+  display: block;
+  margin: 0 0 .5rem;
+  color: var(--ui-dim);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+}
+
+/* ---------------------------------------------------------------- transport */
+
+.ui-transport {
+  display: contents;
+}
+.ui-transport-section {
+  display: grid;
+  grid-template-columns: minmax(4.8rem, .82fr) minmax(6.2rem, 1fr) minmax(4rem, .72fr) repeat(3, minmax(3.25rem, .62fr));
+  align-items: stretch;
+  gap: .38rem;
+  padding-block: .55rem;
+}
+.ui-stat {
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  min-height: 2rem;
+  padding: .28rem .4rem;
+  border: 1px solid var(--ui-line);
+  border-radius: 7px;
+  background: var(--ui-sunk);
+}
+.ui-stat dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  /* Tabular figures alone are not enough: a value that changes width every
+     frame drags the whole row about, and a readout you cannot read at a glance
+     while the music plays is not a readout. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  font-weight: 600;
+}
+.ui-stat dd.is-idle { color: var(--ui-dim); }
+.ui-transport-controls {
+  display: contents;
+}
+.ui-transport-button {
+  min-height: 2rem;
+  border: 1px solid var(--ui-line);
+  border-radius: 7px;
+  background: var(--ui-sunk);
+  color: var(--ui-fg);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: .04em;
+  cursor: pointer;
+}
+.ui-transport-button:hover:not(:disabled) { border-color: var(--ui-accent); }
+.ui-transport-button.is-primary { background: color-mix(in srgb, var(--ui-accent) 14%, var(--ui-sunk)); }
+.ui-transport-button:disabled { opacity: .38; cursor: default; }
+
+/* ---------------------------------------------------------------- look */
+
+.ui-preset-section { background: rgba(255, 255, 255, .018); }
+.ui-preset-row { display: grid; grid-template-columns: 6.6rem minmax(0, 1fr); align-items: center; gap: .45rem; }
+.ui-preset-label { color: var(--ui-muted); font-size: .68rem; letter-spacing: .045em; text-transform: uppercase; }
+.ui-preset-select { flex: 1 1 auto; min-width: 0; font-weight: 600; }
+.ui-preset-picker { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: stretch; gap: .28rem; min-width: 0; }
+.ui-preset-icon-button {
+  width: 2rem;
+  min-height: 2rem;
+  padding: 0;
+  border: 1px solid var(--ui-line);
+  border-radius: 6px;
+  background: var(--ui-sunk);
+  color: var(--ui-fg);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+.ui-preset-icon-button:hover:not(:disabled),
+.ui-preset-icon-button:focus-visible { border-color: var(--ui-accent); outline: none; }
+.ui-preset-icon-button:disabled { opacity: .32; cursor: default; }
+.ui-preset-icon-button.is-destructive { color: color-mix(in srgb, #ff796f 78%, var(--ui-fg)); }
+.ui-preset-icon-button.is-destructive:hover:not(:disabled),
+.ui-preset-icon-button.is-destructive:focus-visible { border-color: #ff796f; }
+.ui-preset-bank-actions { display: flex; justify-content: flex-end; gap: .35rem; }
+/* ---------------------------------------------------------------- crate
+   The searchable preset browser (src/crate/crate.ts). LIVE and CUE are two
+   always-visible slots so "what is showing" and "what is next" never share a
+   control; the list is capped at 200 rows by the view, so its max-height is a
+   scroll box, not a layout the page depends on. */
+
+.ui-crate { display: grid; gap: .4rem; min-width: 0; }
+.ui-crate-slots { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: .35rem; }
+.ui-crate-slot {
+  display: flex;
+  align-items: center;
+  gap: .35rem;
+  min-width: 0;
+  min-height: 2rem;
+  padding: .2rem .25rem .2rem .45rem;
+  border: 1px solid var(--ui-line);
+  border-radius: 7px;
+  background: var(--ui-sunk);
+}
+.ui-crate-slot.is-cue { border-color: color-mix(in srgb, var(--ui-accent) 45%, var(--ui-line)); }
+.ui-crate-slot-label { flex: 0 0 auto; color: var(--ui-dim); font-size: 10px; font-weight: 650; letter-spacing: .09em; text-transform: uppercase; }
+.ui-crate-slot-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 650; }
+.ui-crate-slot-name.is-empty { color: var(--ui-dim); font-weight: 400; }
+#aaavs-ui .ui-crate-go { flex: 0 0 auto; background: var(--ui-accent); border-color: var(--ui-accent); color: #0a0a12; font-weight: 700; }
+#aaavs-ui .ui-crate-go:disabled { background: var(--ui-sunk); border-color: var(--ui-line); color: var(--ui-dim); }
+#aaavs-ui .ui-crate-clear { flex: 0 0 auto; width: 1.8rem; padding-inline: 0; }
+#aaavs-ui .ui-crate-search { width: 100%; min-width: 0; }
+.ui-crate-chips { display: flex; flex-wrap: wrap; gap: .25rem; }
+#aaavs-ui .ui-crate-chip { padding: .12rem .45rem; border-radius: 999px; font-size: 10px; }
+.ui-crate-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 15rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--ui-line);
+  border-radius: 7px;
+  background: var(--ui-sunk);
+}
+.ui-crate-row {
+  display: grid;
+  grid-template-columns: 1.6rem minmax(0, 1fr) minmax(0, 8rem) 1rem auto auto;
+  align-items: center;
+  gap: .3rem;
+  padding: .12rem .3rem;
+  border-bottom: 1px solid rgba(255, 255, 255, .04);
+  cursor: pointer;
+}
+.ui-crate-row:last-child { border-bottom: 0; }
+.ui-crate-row:hover { background: var(--ui-raised); }
+.ui-crate-row.is-live { box-shadow: inset 3px 0 0 var(--ui-accent); }
+#aaavs-ui .ui-crate-row:focus-visible { outline-offset: -2px; }
+.ui-crate-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.ui-crate-collection { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ui-dim); font-size: 10px; }
+.ui-crate-flag { color: var(--ui-warn); text-align: center; }
+.ui-crate-flag.is-heuristic { opacity: .8; }
+#aaavs-ui .ui-crate-star { width: 1.6rem; padding: .05rem 0; background: transparent; border-color: transparent; color: var(--ui-dim); }
+#aaavs-ui .ui-crate-star[aria-pressed="true"] { background: transparent; border-color: transparent; color: var(--ui-solo); }
+#aaavs-ui .ui-crate-row-cue,
+#aaavs-ui .ui-crate-row-go { padding: .08rem .4rem; font-size: 10px; }
+#aaavs-ui .ui-crate-row-go:hover { border-color: var(--ui-accent); color: var(--ui-accent); }
+.ui-crate-empty { padding: .6rem; color: var(--ui-dim); }
+.ui-crate-foot { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; }
+.ui-crate-count { flex: 1 1 auto; color: var(--ui-dim); font-size: 10px; }
+.ui-crate-status { min-height: 1.3em; color: var(--ui-dim); font-size: 11px; }
+.ui-crate-status.is-error { color: var(--ui-accent); }
+.ui-preset-classic { margin-top: .45rem; }
+.ui-preset-classic > .ui-disclosure { padding: .35rem 0; }
+.ui-preset-classic[open] { display: grid; gap: .35rem; }
+
+.ui-auto { display: inline-flex; align-items: center; gap: .4rem; margin-top: .55rem; color: var(--ui-dim); font-size: 11px; }
+.ui-auto input { width: .9rem; height: .9rem; accent-color: var(--ui-accent); }
+
+/* ---------------------------------------------------------------- layer list */
+
+.ui-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: .45rem;
+}
+.ui-list[hidden] { display: none; }
+
+/* Imported AVS owns this region completely. Native layer chrome used to remain
+   in-flow above it because `.ui-list { display:flex }` beat the UA `hidden`
+   rule, producing a convincing but entirely unrelated control surface. */
+#aaavs-ui.is-avs-editor .ui-layers-section {
+  padding: 0;
+  border-bottom: 0;
+}
+#aaavs-ui.is-avs-editor .ui-layers-section > .ui-legend { display: none; }
+.ui-alternate-layer-editor { min-width: 0; }
+.ui-avs-loading {
+  min-height: 16rem;
+  display: grid;
+  place-items: center;
+  padding: 2rem;
+  color: var(--ui-dim);
+  background:
+    linear-gradient(90deg, transparent 49.8%, rgba(255, 61, 129, .12) 50%, transparent 50.2%),
+    var(--ui-sunk);
+  font-size: 10px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.ui-avs-loading.is-error { color: var(--ui-accent); }
+
+.ui-empty {
+  padding: .6rem .2rem;
+  color: var(--ui-dim);
+}
+
+.ui-layer {
+  border: 1px solid var(--ui-line);
+  border-radius: 8px;
+  background: var(--ui-sunk);
+}
+/* Drop indicator. A line rather than a moved row: reflowing the list under the
+   pointer makes the drop target move away from where the user is aiming. */
+.ui-layer.is-over-before { box-shadow: 0 -2px 0 0 var(--ui-accent); }
+.ui-layer.is-over-after { box-shadow: 0 2px 0 0 var(--ui-accent); }
+.ui-layer.is-dragging { opacity: .45; }
+.ui-layer.is-muted .ui-type { color: var(--ui-dim); text-decoration: line-through; }
+
+.ui-layer-head {
+  display: flex;
+  align-items: center;
+  gap: .35rem;
+  padding: .38rem .45rem;
+}
+
+.ui-index {
+  color: var(--ui-dim);
+  font-variant-numeric: tabular-nums;
+  padding: 0 .15rem;
+}
+
+.ui-type {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 650;
+}
+
+.ui-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: .4rem .55rem;
+  padding: 0 .55rem .55rem;
+}
+.ui-field { min-width: 0; }
+.ui-field.is-wide { grid-column: 1 / -1; }
+
+.ui-field label {
+  display: block;
+  color: var(--ui-dim);
+  font-size: 10px;
+  letter-spacing: .05em;
+}
+.ui-field .ui-readout {
+  float: right;
+  color: var(--ui-fg);
+  font-variant-numeric: tabular-nums;
+}
+
+.ui-triple {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: .3rem;
+}
+
+.ui-note {
+  grid-column: 1 / -1;
+  color: var(--ui-warn);
+}
+.ui-note[hidden] { display: none; }
+
+/* ---------------------------------------------------------------- controls */
+
+#aaavs-ui button,
+#aaavs-ui select,
+#aaavs-ui input {
+  font: inherit;
+  color: var(--ui-fg);
+  background: rgba(255, 255, 255, .055);
+  border: 1px solid var(--ui-line);
+  border-radius: 6px;
+  padding: .28rem .45rem;
+  /* Named properties only. `transition: all` animates things nobody chose —
+     including width and height, which turns a hover into a layout pass. */
+  transition: background-color .12s ease, border-color .12s ease, color .12s ease;
+}
+
+#aaavs-ui select,
+#aaavs-ui input[type="number"],
+#aaavs-ui input[type="text"] {
+  width: 100%;
+  min-width: 0;
+}
+
+#aaavs-ui button { cursor: pointer; }
+#aaavs-ui button:hover,
+#aaavs-ui select:hover { background: var(--ui-raised); }
+
+#aaavs-ui .ui-primary {
+  background: var(--ui-accent);
+  border-color: var(--ui-accent);
+  color: #0a0a12;
+  font-weight: 700;
+}
+#aaavs-ui .ui-primary:hover { background: #ff6197; border-color: #ff6197; }
+#aaavs-ui .ui-quiet { color: var(--ui-dim); }
+
+/* Native select popups are painted by the browser, not by the panel. Chromium
+   keeps the inherited near-white text but opens its menu on a white surface,
+   which makes a populated preset bank look empty. Give option rows their own
+   opaque, high-contrast colours; the closed select keeps the dark panel style. */
+#aaavs-ui select option {
+  color: #10101a;
+  background: #f4f4fa;
+}
+
+/* Every interactive thing keeps a visible focus ring. The default outline is
+   removed nowhere in this file; this only makes it brighter and gives it room,
+   because the default ring on a near-black panel is close to invisible. */
+#aaavs-ui :focus-visible {
+  outline: 2px solid var(--ui-accent);
+  outline-offset: 2px;
+}
+
+#aaavs-ui button[aria-pressed="true"] {
+  background: var(--ui-accent);
+  border-color: var(--ui-accent);
+  color: #0a0a12;
+}
+#aaavs-ui button.ui-solo[aria-pressed="true"] {
+  background: var(--ui-solo);
+  border-color: var(--ui-solo);
+}
+#aaavs-ui button:disabled {
+  opacity: .4;
+  cursor: not-allowed;
+}
+
+.ui-icon {
+  flex: 0 0 auto;
+  width: 1.8rem;
+  text-align: center;
+  padding-inline: 0;
+}
+.ui-grip { cursor: grab; }
+.ui-grip:active { cursor: grabbing; }
+.ui-danger:hover { border-color: var(--ui-accent); color: var(--ui-accent); }
+
+#aaavs-ui input[type="range"] {
+  width: 100%;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  accent-color: var(--ui-accent);
+}
+
+.ui-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem;
+}
+.ui-actions > * { flex: 0 0 auto; }
+.ui-actions .ui-grow { flex: 1 1 6rem; min-width: 0; }
+
+/* The file input stays in the tab order and keeps its own focus ring — it is
+   only moved out of sight. `display: none` would take it out of the accessibility
+   tree and off the keyboard entirely, which is the usual way this pattern is
+   got wrong. */
+/* `#aaavs-ui` is on the front of the selector deliberately: the shared
+   `#aaavs-ui input` rule above is an ID selector and would otherwise win on
+   specificity, putting padding and a border back on the box that is supposed to
+   be one pixel across. */
+#aaavs-ui .ui-file input[type="file"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.ui-file {
+  display: inline-block;
+  cursor: pointer;
+  padding: .28rem .45rem;
+  border: 1px solid var(--ui-line);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, .05);
+}
+.ui-file:hover { background: rgba(255, 255, 255, .1); }
+.ui-file:focus-within {
+  outline: 2px solid var(--ui-accent);
+  outline-offset: 2px;
+}
+
+.ui-status {
+  min-height: 1.5em;
+  color: var(--ui-dim);
+}
+.ui-status.is-error { color: var(--ui-accent); }
+
+/* ---------------------------------------------------------------- preset tools */
+
+.ui-preset-tools { padding: 0; }
+.ui-disclosure {
+  cursor: pointer;
+  padding: .65rem .75rem;
+  color: var(--ui-dim);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+}
+.ui-preset-tools[open] > .ui-disclosure { border-bottom: 1px solid var(--ui-line); color: var(--ui-fg); }
+.ui-preset-tools[open] > .ui-field,
+.ui-preset-tools[open] > .ui-actions,
+.ui-preset-tools[open] > .ui-status { margin-inline: .75rem; }
+.ui-preset-tools[open] > .ui-field:first-of-type { margin-top: .65rem; }
+.ui-preset-tools[open] > .ui-status { margin-bottom: .65rem; }
+
+.ui-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (max-width: 680px) {
+  #aaavs-ui {
+    top: auto;
+    right: .75rem;
+    bottom: .75rem;
+    width: min(30rem, calc(100vw - 1.5rem));
+    max-height: min(70vh, calc(100vh - 1.5rem));
+  }
+  .ui-fields { grid-template-columns: 1fr; }
+  .ui-transport-section {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: .22rem;
+    padding-inline: .45rem;
+  }
+  .ui-stat,
+  .ui-transport-button { min-height: 1.8rem; padding-inline: .2rem; }
+  .ui-stat dd,
+  .ui-transport-button { font-size: 9px; letter-spacing: 0; }
+}
+
+@media (max-width: 420px) {
+  .ui-preset-row { grid-template-columns: 1fr; gap: .25rem; }
+  .ui-preset-picker { width: 100%; }
+  .ui-crate-slots { grid-template-columns: 1fr; }
+  .ui-crate-row { grid-template-columns: 1.6rem minmax(0, 1fr) 1rem auto auto; }
+  .ui-crate-collection { display: none; }
+}
+
+/* ---------------------------------------------------------------- motion */
+
+@media (prefers-reduced-motion: reduce) {
+  #aaavs-ui button,
+  #aaavs-ui select,
+  #aaavs-ui input { transition: none; }
+}

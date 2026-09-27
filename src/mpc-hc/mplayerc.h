@@ -44,8 +44,8 @@
 #include <mutex>
 #include <afxwinappex.h>
 
-#define MPC_WND_CLASS_NAME L"MediaPlayerClassicW"
-#define MPC_RECOVERY_MUTEX_NAME L"MediaPlayerClassicW_RedirectRecovery"
+#define MPC_WND_CLASS_NAME L"MPCAAAVSW"
+#define MPC_RECOVERY_MUTEX_NAME L"MPCAAAVSW_RedirectRecovery"
 
 // define the default logo we use
 #define DEF_LOGO IDF_LOGO3

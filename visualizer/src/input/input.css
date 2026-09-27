@@ -1,0 +1,244 @@
+/* The live-input panel.
+ *
+ * Companion to `panel.ts`, which injects a <link> to this file the same way
+ * `ui.ts` does for the layer panel. The palette is lifted from index.html and
+ * ui.css on purpose: three sets of "nearly the same dark grey" reads as three
+ * applications sharing a window.
+ *
+ * Everything is scoped under #aaavs-input. The panel sits bottom-left so it
+ * never covers the layer panel (top-right), the HUD (top-left) or the offline
+ * launcher (bottom-right).
+ */
+
+#aaavs-input {
+  --in-fg: var(--fg, #e9e9f2);
+  --in-dim: var(--dim, #8a8aa0);
+  --in-line: var(--line, rgba(255, 255, 255, .12));
+  --in-accent: var(--accent, #ff3d81);
+  --in-ok: #42d8ee;
+  --in-panel: rgba(8, 9, 16, .94);
+  --in-sunk: rgba(255, 255, 255, .035);
+
+  position: fixed;
+  left: 1.25rem;
+  bottom: 1.25rem;
+  z-index: 15;
+  width: min(30rem, calc(100vw - 2.5rem));
+  max-height: calc(100vh - 8rem);
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+
+  border: 1px solid var(--in-line);
+  border-radius: 12px;
+  background: var(--in-panel);
+  backdrop-filter: blur(10px);
+  color: var(--in-fg);
+  font: 12px/1.45 ui-monospace, "Cascadia Mono", Menlo, Consolas, monospace;
+}
+
+#aaavs-input[hidden] { display: none; }
+
+#aaavs-input h2,
+#aaavs-input h3,
+#aaavs-input p,
+#aaavs-input ul,
+#aaavs-input li { margin: 0; padding: 0; }
+
+#aaavs-input ul { list-style: none; }
+
+#aaavs-input :focus-visible {
+  outline: 2px solid var(--in-accent);
+  outline-offset: 1px;
+}
+
+/* ---------------------------------------------------------------- header */
+
+.in-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: .65rem;
+  padding: .65rem .75rem .6rem;
+  border-bottom: 1px solid var(--in-line);
+}
+
+.in-title {
+  flex: 1 1 auto;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .18em;
+  color: var(--in-fg);
+}
+
+.in-x {
+  padding: 0 .45rem;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: var(--in-dim);
+  font: inherit;
+  cursor: pointer;
+}
+
+.in-x:hover { color: var(--in-fg); border-color: var(--in-line); }
+
+/* ---------------------------------------------------------------- body */
+
+.in-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: .5rem .75rem .25rem;
+}
+
+.in-section + .in-section { border-top: 1px solid var(--in-line); }
+
+.in-section {
+  display: flex;
+  flex-direction: column;
+  gap: .4rem;
+  padding: .6rem 0;
+}
+
+.in-section-head {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+}
+
+.in-section-title {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .14em;
+  color: var(--in-accent);
+}
+
+.in-dot {
+  width: .5rem;
+  height: .5rem;
+  border-radius: 50%;
+  background: var(--in-dim);
+  opacity: .5;
+}
+
+.in-dot.is-ok { background: var(--in-ok); opacity: 1; }
+
+.in-status { color: var(--in-dim); }
+
+.in-note { color: var(--in-dim); font-size: 11px; }
+
+.in-field {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+}
+
+.in-field-label { color: var(--in-dim); }
+
+.in-select {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: .25rem .35rem;
+  border: 1px solid var(--in-line);
+  border-radius: 4px;
+  background: var(--in-sunk);
+  color: var(--in-fg);
+  font: inherit;
+}
+
+/* ---------------------------------------------------------------- mappings */
+
+.in-list {
+  display: flex;
+  flex-direction: column;
+  gap: .25rem;
+}
+
+.in-row {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  padding: .25rem .35rem;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: var(--in-sunk);
+}
+
+/* Native-lane-only target while an AVS preset plays: greyed and not learnable. */
+.in-row.is-inert { opacity: .45; }
+
+.in-row.is-learning {
+  border-color: var(--in-accent);
+  background: rgba(255, 61, 129, .1);
+}
+
+.in-row-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.in-row-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.in-row-hint { color: var(--in-dim); font-size: 10px; }
+
+.in-bind {
+  flex: 0 0 auto;
+  max-width: 10rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--in-dim);
+  font-size: 10px;
+}
+
+.in-bind.is-set { color: var(--in-ok); }
+
+/* ---------------------------------------------------------------- buttons */
+
+.in-btn {
+  flex: 0 0 auto;
+  padding: .3rem .5rem;
+  border: 1px solid var(--in-line);
+  border-radius: 4px;
+  background: var(--in-sunk);
+  color: var(--in-fg);
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: .1em;
+  cursor: pointer;
+}
+
+.in-btn:hover:not(:disabled) { border-color: var(--in-accent); }
+
+.in-btn:disabled { opacity: .35; cursor: default; }
+
+.in-btn.is-primary {
+  align-self: flex-start;
+  border-color: var(--in-accent);
+  background: var(--in-accent);
+  color: #0b0b14;
+  font-weight: 600;
+}
+
+.in-btn.is-small { padding: .2rem .4rem; }
+
+.in-btn.is-icon { width: 1.6rem; text-align: center; }
+
+/* ---------------------------------------------------------------- footer */
+
+.in-last {
+  flex: 0 0 auto;
+  padding: .45rem .75rem .55rem;
+  border-top: 1px solid var(--in-line);
+  color: var(--in-dim);
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

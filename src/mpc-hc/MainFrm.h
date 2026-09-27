@@ -795,6 +795,8 @@ public:
 
     CCritSec lockGraphAccess;
     OAFilterState GetMediaStateDirect();
+    afx_msg void OnAAAVSPreset(UINT id);
+    afx_msg void OnUpdateAAAVSPreset(CCmdUI* ui);
     OAFilterState GetMediaState();
     OAFilterState UpdateCachedMediaState();
     bool MediaControlRun(bool waitforcompletion = false);

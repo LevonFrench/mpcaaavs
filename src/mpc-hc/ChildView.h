@@ -22,6 +22,7 @@
 #pragma once
 
 #include "MouseWndWithArtView.h"
+#include "AAAVSView.h"
 
 class CChildView : public CMouseWndWithArtView
 {
@@ -33,6 +34,7 @@ class CChildView : public CMouseWndWithArtView
     void EventCallback(MpcEvent ev);
 
 public:
+    AAAVSView m_aaavs;
     CChildView(CMainFrame* pMainFrm);
     virtual ~CChildView();
 
@@ -44,6 +46,9 @@ protected:
 
     DECLARE_MESSAGE_MAP()
 
+    afx_msg int OnCreate(LPCREATESTRUCT cs);
+    afx_msg void OnDestroy();
+    afx_msg void OnTimer(UINT_PTR id);
     afx_msg void OnPaint();
     afx_msg void OnSize(UINT nType, int cx, int cy);
     afx_msg LRESULT OnNcHitTest(CPoint point);

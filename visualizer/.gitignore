@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.tmp/
+avs presets/
+
+# Golden-image failure artefacts. The baselines themselves are committed.
+tools/golden/*.actual.png
+tools/golden/*.diff.png

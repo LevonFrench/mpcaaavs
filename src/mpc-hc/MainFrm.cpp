@@ -352,6 +352,8 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
     ON_UPDATE_COMMAND_UI(ID_FILE_OPENMEDIA, OnUpdateFileOpen)
     ON_COMMAND(ID_FILE_OPENMEDIA, OnFileOpenmedia)
     ON_UPDATE_COMMAND_UI(ID_FILE_OPENMEDIA, OnUpdateFileOpen)
+    ON_COMMAND_RANGE(ID_AAAVS_PREVIOUS, ID_AAAVS_SHUFFLE, OnAAAVSPreset)
+    ON_UPDATE_COMMAND_UI_RANGE(ID_AAAVS_PREVIOUS, ID_AAAVS_SHUFFLE, OnUpdateAAAVSPreset)
     ON_WM_COPYDATA()
     ON_COMMAND(ID_FILE_OPENDVDBD, OnFileOpendvd)
     ON_UPDATE_COMMAND_UI(ID_FILE_OPENDVDBD, OnUpdateFileOpen)
@@ -25429,4 +25431,10 @@ LRESULT CMainFrame::OnSmtcRate(WPARAM wParam, LPARAM lParam) {
         SetPlayingRate(rate);
     }
     return 0;
+}
+
+void CMainFrame::OnAAAVSPreset(UINT id) { m_wndView.m_aaavs.Command(id); }
+void CMainFrame::OnUpdateAAAVSPreset(CCmdUI* ui) {
+    ui->Enable(m_wndView.m_aaavs.Ready());
+    if (ui->m_nID == ID_AAAVS_SHUFFLE) ui->SetCheck(m_wndView.m_aaavs.Shuffle());
 }

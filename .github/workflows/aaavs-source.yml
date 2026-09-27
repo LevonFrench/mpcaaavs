@@ -1,0 +1,24 @@
+name: AAAVS source checks
+on:
+  push:
+    branches: [aaavs-integration]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  visualizer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: visualizer/package-lock.json
+      - run: npm ci
+        working-directory: visualizer
+      - run: npm run check
+        working-directory: visualizer
+      - run: npm run build
+        working-directory: visualizer

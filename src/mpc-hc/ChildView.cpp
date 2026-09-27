@@ -110,12 +110,35 @@ BOOL CChildView::PreTranslateMessage(MSG* pMsg)
 IMPLEMENT_DYNAMIC(CChildView, CMouseWnd)
 
 BEGIN_MESSAGE_MAP(CChildView, CMouseWnd)
+    ON_WM_CREATE()
+    ON_WM_DESTROY()
+    ON_WM_TIMER()
     ON_WM_PAINT()
     ON_WM_ERASEBKGND()
     ON_WM_SIZE()
     ON_WM_NCHITTEST()
     ON_WM_NCLBUTTONDOWN()
 END_MESSAGE_MAP()
+
+int CChildView::OnCreate(LPCREATESTRUCT cs)
+{
+    if (__super::OnCreate(cs) == -1) return -1;
+    SetTimer(0xAA01, 33, nullptr);
+    return 0;
+}
+void CChildView::OnDestroy()
+{
+    KillTimer(0xAA01);
+    m_aaavs.Close();
+    __super::OnDestroy();
+}
+void CChildView::OnTimer(UINT_PTR id)
+{
+    if (id == 0xAA01) {
+        const bool visible = m_pMainFrame->GetLoadState() == MLS::LOADED && m_pMainFrame->m_fAudioOnly;
+        m_aaavs.Tick(m_hWnd, visible, visible && m_pMainFrame->GetMediaState() == State_Running, visible ? m_pMainFrame->GetPos() : 0);
+    } else __super::OnTimer(id);
+}
 
 void CChildView::OnPaint()
 {
@@ -126,6 +149,7 @@ void CChildView::OnPaint()
 void CChildView::OnSize(UINT nType, int cx, int cy)
 {
     __super::OnSize(nType, cx, cy);
+    m_aaavs.Resize();
     // bitmap OSD draws into the renderer, so it never gets its own WM_SIZE
     if (m_pMainFrame->m_OSD.GetOSDType() == OSD_TYPE_BITMAP && m_pMainFrame->m_pVideoWnd == this) {
         m_pMainFrame->m_OSD.OnSize(nType, cx, cy);

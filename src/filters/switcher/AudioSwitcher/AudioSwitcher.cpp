@@ -20,6 +20,7 @@
  */
 
 #include "stdafx.h"
+#include "../../../DSUtil/AAAVSAudio.h"
 #include <algorithm>
 #include <math.h>
 #include <MMReg.h>
@@ -476,6 +477,10 @@ HRESULT CAudioSwitcherFilter::Transform(IMediaSample* pIn, IMediaSample* pOut)
     }
 
     pOut->SetActualDataLength(lenout * bps * wfeout->nChannels);
+    REFERENCE_TIME aaStart = 0, aaStop = 0;
+    if (SUCCEEDED(pOut->GetTime(&aaStart, &aaStop))) {
+        AAAVS::Tap().Push(pDataOut, pOut->GetActualDataLength(), wfeout, m_rtSegmentStart + aaStart);
+    }
 
     return S_OK;
 }
@@ -562,6 +567,7 @@ HRESULT CAudioSwitcherFilter::DeliverNewSegment(REFERENCE_TIME tStart, REFERENCE
             m_normalizeFactor = std::max(m_normalizeFactor, std::max(1.0, m_nMaxNormFactor * 0.5));
         }
     }
+    AAAVS::Tap().Reset();
     m_rtSegmentStart = tStart;
 
     return __super::DeliverNewSegment(tStart, tStop, dRate);

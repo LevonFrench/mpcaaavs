@@ -1,0 +1,19 @@
+{
+  "name": "mpc-aaavs-visualizer",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "description": "AAAVS rendering engine and embedded MPC-HC host (experimental)",
+  "scripts": {
+    "build": "node tools/build-mpc.mjs",
+    "build:mpc": "node tools/build-mpc.mjs",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && node tools/check-mpc-navigation.mjs",
+    "check:local-catalog": "node tools/check-mpc-catalog.mjs"
+  },
+  "devDependencies": {
+    "@webgpu/types": "^0.1.60",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.7.0"
+  }
+}

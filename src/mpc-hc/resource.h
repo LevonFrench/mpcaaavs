@@ -2,6 +2,9 @@
 // Microsoft Visual C++ generated include file.
 // Used by mpc-hc.rc
 //
+#define ID_AAAVS_PREVIOUS 31000
+#define ID_AAAVS_NEXT 31001
+#define ID_AAAVS_SHUFFLE 31002
 #define IDR_MAINFRAME                   128
 #define IDR_POPUP                       130
 #define IDR_POPUPMAIN                   133
