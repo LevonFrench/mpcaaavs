@@ -22,5 +22,20 @@ int main() {
     for(const auto& path:{"presets/../escape.avs","C:/escape.avs","presets/unique/test.txt","presets/unique/../../escape.avs"}){failed=false;try{PresetPath(root,path);}catch(...){failed=true;}assert(failed);}
     failed=false;try{Rate(root,hash,0);}catch(...){failed=true;}assert(failed);
     failed=false;try{Rate(root,std::string(64,'b'),3);}catch(...){failed=true;}assert(failed);
-    std::cout<<"Rating filesystem: rename, timestamp, byte preservation, repeated rating, atomic rollback, invalid paths and unknown IDs PASS\n";
+    const std::string nervHash(64,'c');const auto nervSource=root/L"presets/unique/NERV 01 - Boot.nerv";
+    const std::string manifest="{\"format\":\"mpcaaavs-nerv\",\"version\":1,\"scene\":\"boot\"}";
+    {std::ofstream f(nervSource,std::ios::binary);f<<manifest;}fs::last_write_time(nervSource,old);
+    rapidjson::Document mixed;mixed.Parse(Read(catalog).c_str());auto& allocator=mixed.GetAllocator();
+    rapidjson::Value nerv(rapidjson::kObjectType);
+    nerv.AddMember("sha256",rapidjson::Value(nervHash.c_str(),allocator),allocator);
+    nerv.AddMember("canonical_path","presets/unique/NERV 01 - Boot.nerv",allocator);
+    nerv.AddMember("kind","nerv",allocator);nerv.AddMember("scene","boot",allocator);
+    mixed["presets"].PushBack(nerv,allocator);AtomicWrite(catalog,Json(mixed));
+    Rate(root,nervHash,4);const auto nervRated=root/L"presets/unique/NERV 01 - Boot [4 stars].nerv";
+    assert(!fs::exists(nervSource)&&fs::exists(nervRated));assert(Read(nervRated)==manifest);assert(fs::last_write_time(nervRated)>old);
+    Rate(root,nervHash,2);const auto nervTwo=root/L"presets/unique/NERV 01 - Boot [2 stars].nerv";
+    assert(!fs::exists(nervRated)&&fs::exists(nervTwo));assert(Read(nervTwo)==manifest);assert(fs::exists(one));
+    mixed.Parse(Read(catalog).c_str());assert(mixed["presets"].Size()==2);
+    assert(std::string(mixed["presets"][1]["kind"].GetString())=="nerv");assert(std::string(mixed["presets"][1]["scene"].GetString())=="boot");
+    std::cout<<"Rating filesystem: AVS/NERV rename, timestamp, byte preservation, repeated rating, atomic rollback, mixed catalog, invalid paths and unknown IDs PASS\n";
 }

@@ -52,7 +52,7 @@ inline fs::path PresetPath(const fs::path& root, const std::string& relative) {
     if (relative.rfind("presets/", 0) != 0 || relative.find('\\') != std::string::npos || relative.find(':') != std::string::npos || relative.find('\0') != std::string::npos) throw std::runtime_error("Invalid preset path");
     fs::path p(Wide(relative));
     for (const auto& part : p) if (part == L".." || part == L"." || part.empty()) throw std::runtime_error("Invalid preset path");
-    if (p.extension() != L".avs") throw std::runtime_error("Not an AVS preset");
+    if (p.extension() != L".avs" && p.extension() != L".nerv") throw std::runtime_error("Not a supported preset file");
     const auto result = root / p; NoLinks(result); return result;
 }
 inline void AtomicWrite(const fs::path& path, const std::string& data) {
@@ -77,7 +77,7 @@ inline std::string Rate(const fs::path& root, const std::string& hash, int ratin
         const auto source = PresetPath(root, oldRelative);
         if (!fs::is_regular_file(source)) throw std::runtime_error("Preset file is missing");
         const auto stem = std::regex_replace(source.stem().u8string(), std::regex(" \\[[1-5] stars\\]$"), "");
-        const auto relative = fs::path(Wide(oldRelative)).parent_path() / Wide(stem + " [" + std::to_string(rating) + " stars].avs");
+        const auto relative = fs::path(Wide(oldRelative)).parent_path() / Wide(stem + " [" + std::to_string(rating) + " stars]" + source.extension().u8string());
         const auto target = PresetPath(root, relative.generic_u8string());
         if (source != target && fs::exists(target)) throw std::runtime_error("Rated filename already exists");
         const auto oldTime = fs::last_write_time(source);

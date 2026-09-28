@@ -1,7 +1,8 @@
 import type {LocalAvsPreset} from './avs/local-collection.ts';
 import {parseSetups, type PresetSetup, type SetupSettings} from './mpc-setups.ts';
+import {defaultSceneTiming,type SceneTiming} from './mpc-scene-clock.ts';
 import {TRANSITIONS} from './mpc-transition.ts';
-interface Actions { catalog():readonly LocalAvsPreset[]; current():number; settings():SetupSettings; load(index:number):void; rate(index:number,value:number):void; send(value:unknown):void; activate(setup:PresetSetup|null):void; panel(mode:number):void; close():void }
+interface Actions { catalog():readonly LocalAvsPreset[]; current():number; settings():SetupSettings; load(index:number):void; rate(index:number,value:number):void; send(value:unknown):void; activate(setup:PresetSetup|null):void; nervSetup?():PresetSetup; panel(mode:number):void; close():void }
 /** Lazy management view: opening it does not create a renderer or audio context. */
 export class PresetManagement {
   private root:HTMLElement|null=null;
@@ -28,7 +29,7 @@ export class PresetManagement {
   private element<K extends keyof HTMLElementTagNameMap>(tag:K,text='',className='') {const e=document.createElement(tag);e.textContent=text;e.className=className;return e;}
   private button(text:string,action:()=>void,disabled=false){const b=this.element('button',text);b.type='button';b.disabled=disabled;b.onclick=action;return b;}
   private tell(text:string){this.feedback=text;this.draw();}
-  private newDraft(){this.draft={id:crypto.randomUUID(),name:'New setup',presets:[],settings:{...this.a.settings()}};this.dirty=true;this.draw();}
+  private newDraft(){this.draft={id:crypto.randomUUID(),name:'New setup',presets:[],settings:{...this.a.settings()},timing:{...defaultSceneTiming}};this.dirty=true;this.draw();}
   private abandon(){return !this.dirty||window.confirm('Discard unsaved setup changes?');}
   private draw(){
     if(!this.root||!this.mode)return;
@@ -64,6 +65,7 @@ export class PresetManagement {
     detail.append(this.element('h2','Saved setups'));
     const pick=this.element('select');pick.setAttribute('aria-label','Saved setups');pick.append(this.element('option','Choose a setup…'));
     for(const s of this.sets){const o=this.element('option',s.name);o.value=s.id;pick.append(o);}pick.value=this.draft?.id??'';pick.onchange=()=>{const s=this.sets.find(s=>s.id===pick.value);if(s&&this.abandon()){this.draft=structuredClone(s);this.dirty=false;}this.draw();};detail.append(pick,this.button('New setup',()=>{if(this.abandon())this.newDraft();},!this.loaded));
+    if(this.a.nervSetup)detail.append(this.button('NERV scene set',()=>{if(this.abandon()){this.draft=structuredClone(this.a.nervSetup!());this.dirty=true;this.feedback='NERV scene set ready. Set the song BPM and offset, then activate or save.';this.draw();}},!this.loaded));
     if(!this.loaded)detail.append(this.element('p','Loading saved setups…'));
     if(!this.draft)return;const draft=this.draft;
     const name=this.element('input');name.value=draft.name;name.maxLength=120;name.setAttribute('aria-label','Setup name');name.oninput=()=>{draft.name=name.value;this.dirty=true;};detail.append(name);
@@ -72,6 +74,21 @@ export class PresetManagement {
     const select=(label:string,key:'bars'|'transition'|'beats'|'durationMs',values:readonly (readonly [number,string])[])=>{const wrapper=this.element('label',label);const el=this.element('select');for(const [v,t]of values){const o=this.element('option',t);o.value=String(v);el.append(o);}el.value=String(draft.settings[key]);el.onchange=()=>{draft.settings[key]=Number(el.value);this.dirty=true;};wrapper.append(el);detail.append(wrapper);};
     select('Auto phrase','bars',[[0,'Adaptive: 2–12 bars'],[2,'2 bars'],[4,'4 bars'],[8,'8 bars'],[12,'12 bars']]);select('Transition','transition',TRANSITIONS.map((t,i)=>[i,t] as const));select('Duration','beats',[[0,'Seconds'],[1,'1 beat'],[2,'2 beats'],[4,'4 beats']]);select('Seconds / fallback','durationMs',[[250,'0.25'],[500,'0.5'],[1000,'1'],[2000,'2'],[4000,'4'],[8000,'8']]);
     for(const [key,text]of [['enabled','Auto switching'],['shuffle','Shuffle'],['keepOld','Animate outgoing preset'],['manualFade','Transitions on manual changes'],['autoFade','Transitions on Auto changes']] as const){const label=this.element('label',text),box=this.element('input');box.type='checkbox';box.checked=draft.settings[key];box.onchange=()=>{draft.settings[key]=box.checked;this.dirty=true;};label.prepend(box);detail.append(label);}
+    this.timingControls(detail,draft);
     detail.append(this.button('Save setup',()=>{try{if(!draft.presets.length)throw Error('Add at least one preset.');const next=this.sets.filter(s=>s.id!==draft.id);next.push(structuredClone(draft));this.pending=parseSetups(next);this.a.send({op:'save-setups',setups:this.pending});this.feedback='Saving…';this.draw();}catch(e){this.tell(String(e));}},!!this.pending||!this.loaded),this.button('Activate setup',()=>{try{if(!draft.presets.length)throw Error('Add at least one preset.');this.a.activate(parseSetups([draft])[0]!);this.tell(`Active setup: ${draft.name}`);}catch(e){this.tell(String(e));}}),this.button('Use entire library',()=>{this.a.activate(null);this.tell('Using the entire preset library.');}),this.button('Delete saved setup',()=>{if(window.confirm(`Delete saved setup “${draft.name}”? Preset files are kept.`)){this.pending=this.sets.filter(s=>s.id!==draft.id);this.a.send({op:'save-setups',setups:this.pending});this.feedback='Deleting saved setup…';this.draw();}},!!this.pending||!this.sets.some(s=>s.id===draft.id)));
+  }
+  private timingControls(detail:HTMLElement,draft:PresetSetup){
+    const timing=draft.timing??={...defaultSceneTiming};
+    detail.append(this.element('h2','Repeatable scene timing'));
+    const label=this.element('label','Follow the song clock'),toggle=this.element('input');toggle.type='checkbox';toggle.checked=timing.enabled;toggle.setAttribute('aria-label','Repeatable scene timing');
+    toggle.onchange=()=>{timing.enabled=toggle.checked;this.dirty=true;this.draw();};label.prepend(toggle);detail.append(label);
+    detail.append(this.element('p','The same song position selects the same scene, including after a seek or repeat. Uses a fixed BPM and 4-beat bars; live audio still drives the instruments. Auto switching must be on. This clock replaces adaptive phrase timing while enabled.'));
+    const number=(text:string,key:Exclude<keyof SceneTiming,'enabled'>,min:number,max:number,step:string)=>{
+      const wrapper=this.element('label',text),input=this.element('input');input.type='number';input.value=String(timing[key]);input.min=String(min);input.max=String(max);input.step=step;input.disabled=!timing.enabled;input.setAttribute('aria-label',text);
+      input.oninput=()=>{timing[key]=input.value.trim()?Number(input.value):NaN;this.dirty=true;};wrapper.append(input);detail.append(wrapper);
+    };
+    number('Song BPM','bpm',20,400,'0.01');number('First scene offset (seconds)','offsetSeconds',-3600,3600,'0.01');number('Bars per scene','barsPerScene',1,128,'1');number('Shuffle seed','seed',0,4294967295,'1');
+    detail.append(this.element('p','A positive offset holds the opening scene until that time. A negative offset starts partway through the sequence. Shuffle repeats the same seeded order on every replay.'));
+    detail.append(this.element('p','Timed NERV changes use repeatable crossfades, or Cut when selected. Manual changes retain the selected transition style. Next, Previous or Load preset holds the scene clock; activate the setup again or turn Auto off and on to resume.'));
   }
 }

@@ -2,6 +2,15 @@
 import type { AvsComponentControl } from './avs/executor.ts';
 import type { AvsAudioFrame, AvsPresetAst } from './avs/types.ts';
 import type { AvsFrameGraphLane } from './avs/gpu-frame-graph.ts';
+import type { NervSceneFrame, NervSceneId } from './nerv-scenes.ts';
+
+/** Absolute playback clock. The NERV worker is stateless across seeks. */
+export interface NervPlaybackFrame extends Omit<NervSceneFrame, 'scene' | 'audio'> {
+  readonly previousScene?: NervSceneId;
+  readonly previousLocalTime?: number;
+  readonly previousTime?: number;
+  readonly blend?: number;
+}
 
 export interface AvsWorkerLoadMessage {
   readonly type: 'load';
@@ -21,6 +30,7 @@ export interface AvsWorkerRenderMessage {
   readonly pcm: ArrayBuffer;
   /** Host-accumulated full-band audio; legacy clients may continue sending PCM only. */
   readonly audio?: AvsAudioFrame;
+  readonly nerv?: NervPlaybackFrame;
   readonly width: number;
   readonly height: number;
 }

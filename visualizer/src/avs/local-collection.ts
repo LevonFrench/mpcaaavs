@@ -1,4 +1,5 @@
 import { boundedBytes, boundedJson, localAssetUrl, MAX_ASSET_BYTES, MAX_CATALOG_ENTRIES, verifyDigest } from './local-assets.ts';
+import { NERV_SCENES, type NervSceneId } from '../nerv-scenes.ts';
 export interface LocalAvsPreset {
   readonly id: string;
   readonly name: string;
@@ -9,6 +10,8 @@ export interface LocalAvsPreset {
   readonly parserStatus: 'lossless' | 'roundtrip-mismatch' | 'parse-error' | 'unknown';
   readonly autoEligible: boolean;
   readonly rating?: number;
+  readonly kind?: 'avs' | 'nerv';
+  readonly scene?: NervSceneId;
   readonly unavailableReason?: string;
 }
 
@@ -19,6 +22,8 @@ interface LocalCatalogJson {
     readonly canonical_path?: unknown;
     readonly display_name?: unknown;
     readonly rating?: unknown;
+    readonly kind?: unknown;
+    readonly scene?: unknown;
   }[];
 }
 
@@ -69,6 +74,9 @@ export function parseLocalAvsCatalog(
       ? typeof parser?.error === 'string' ? parser.error : 'The AVS parser rejected this historical preset'
       : undefined;
     const url = localAssetUrl(entry.canonical_path, 'presets', baseUrl);
+    const kind = entry.kind === 'nerv' ? 'nerv' : 'avs';
+    if (kind === 'nerv' && !entry.canonical_path.endsWith('.nerv')) throw new Error('Invalid NERV preset extension');
+    if (kind === 'nerv' && !NERV_SCENES.includes(entry.scene as NervSceneId)) throw new Error('Invalid NERV scene ID');
     return Object.freeze({
       id: `local:${entry.sha256}`,
       name: entry.display_name,
@@ -76,6 +84,8 @@ export function parseLocalAvsCatalog(
       sha256: entry.sha256,
       bytes: entry.bytes,
       url,
+      kind,
+      ...(kind === 'nerv' ? {scene:entry.scene as NervSceneId} : {}),
       parserStatus,
       autoEligible: parserStatus !== 'parse-error',
       rating: typeof entry.rating === 'number' && Number.isInteger(entry.rating) && entry.rating >= 1 && entry.rating <= 5 ? entry.rating : 0,

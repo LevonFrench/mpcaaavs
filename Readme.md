@@ -29,9 +29,11 @@ Broader Windows validation remains: measured audio/visual sync, resize/DPI/fulls
 
 ## Presets
 
+The source includes **16 NERV scene presets** inspired by [bizarro/evangelion](https://github.com/bizarro/evangelion). Open **Setup Builder (Ctrl+F7) > NERV scene set** to activate a sequence with a saved fixed BPM, bar length, offset and shuffle seed. Scene selection and motion follow song time across pause, seek and repeat; the instruments react to live audio. The scenes also work as individually selectable, rateable presets. See [NERV scenes and timing](docs/NERV-SCENES.md) for controls and validation limits.
+
 The development installation uses a **3,409-entry local canonical collection**, including the 124 curated picks. Every local catalog file passed size and SHA-256 verification. Three entries have recorded parser failures. Inclusion in the catalog does not imply faithful rendering of every historical effect.
 
-**No preset packs, third-party bitmap packs, fonts or APE binaries are distributed in this repository.** Keep your existing collection local, under `visualizer/avs presets/`, with:
+**Historical AVS packs, third-party bitmap packs, fonts and APE binaries are not distributed in this repository.** Keep your existing AVS collection local, under `visualizer/avs presets/`, with:
 
 - `catalog/presets.json`, `catalog/parser-validation.json`, `catalog/dependencies.json`
 - the catalog's `presets/unique/` files
@@ -53,7 +55,7 @@ npm run check
 npm run build
 ```
 
-The public renderer build deliberately does not embed preset or bitmap packs. With your local collection present, run `npm run check:local-catalog` to verify the entire catalog.
+The public renderer build deliberately does not embed historical AVS or bitmap packs. Staging installs the public NERV manifests and also works without a private collection. With your local AVS collection present, run `npm run check:local-catalog` to verify that catalog.
 
 Run `python tools/check-native-audio.py` for the CPU PCM fixture. Build scripts discover Visual Studio; `MSBUILD_EXE` can override the native builder path. Run `python tools/build-native.py` for the x64 **Release Lite developer build**, then `tools/stage-aaavs.ps1` to stage the visualizer and local collection alongside `mpc-aaavs.exe`. Double-click `start-mpc-aaavs.cmd` to launch a completed local build. Lite omits internal LAV codecs and uses installed DirectShow codecs (such as K-Lite); a self-contained release needs the full upstream codec build. WebView2 Runtime must be available on the target machine. The staging tool is for local use, not a public redistribution package. On the development machine, the required DirectX support DLL and optional MediaInfo/icon DLLs were copied locally from the existing K-Lite installation, which was left unchanged; these DLLs are not in this repository.
 
