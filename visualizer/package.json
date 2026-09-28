@@ -8,8 +8,10 @@
     "build": "node tools/build-mpc.mjs",
     "build:mpc": "node tools/build-mpc.mjs",
     "typecheck": "tsc --noEmit",
-    "check": "npm run typecheck && node tools/check-mpc-navigation.mjs && node tools/check-mpc-selection.mjs && node tools/check-mpc-auto.mjs && node tools/check-mpc-host.mjs && node tools/check-mpc-audio-batch.mjs && node tools/check-mpc-safety.mjs && node tools/check-mpc-security.mjs && node tools/check-mpc-spectrum.mjs && node tools/check-mpc-clock.mjs && node tools/check-mpc-management.mjs && node tools/check-mpc-scene-clock.mjs && node tools/check-nerv-scenes.mjs && node tools/check-nerv-install.mjs && node tools/check-nerv-host.mjs && node tools/check-nerv-worker.mjs",
-    "check:local-catalog": "node tools/check-mpc-catalog.mjs"
+    "check": "npm run typecheck && node tools/check-mpc-navigation.mjs && node tools/check-mpc-selection.mjs && node tools/check-mpc-auto.mjs && node tools/check-mpc-host.mjs && node tools/check-mpc-audio-batch.mjs && node tools/check-mpc-safety.mjs && node tools/check-mpc-security.mjs && node tools/check-mpc-spectrum.mjs && node tools/check-mpc-clock.mjs && node tools/check-mpc-management.mjs && node tools/check-mpc-scene-clock.mjs && node tools/check-nerv-scenes.mjs && node tools/check-nerv-install.mjs && node tools/check-nerv-host.mjs && node tools/check-nerv-worker.mjs && npm run check:player",
+    "check:local-catalog": "node tools/check-mpc-catalog.mjs",
+    "build:player": "node tools/build-standalone.mjs",
+    "check:player": "node tools/check-standalone-player.mjs && node tools/check-standalone-library.mjs && node tools/check-standalone-catalog.mjs"
   },
   "devDependencies": {
     "@webgpu/types": "^0.1.60",

@@ -34,6 +34,10 @@ Historical AVS packs, bitmap packs, fonts, and APE binaries are **not distribute
 
 ## Build and release
 
+Stock AAAVS can also use the shared Player, preset management, transitions and
+NERV timing while retaining its Studio and offline tools. See the
+[shared development and mirroring guide](docs/AAAVS-SHARED-DEVELOPMENT.md).
+
 Start with the [build guide](docs/BUILDING.md). Maintainers can create a public-only archive using the [release guide](docs/RELEASING.md); the packager creates a SHA-256 inventory and verifies an extracted copy. It does not copy private presets, saved setups, playback history, WebView profiles, debug symbols, or personal configuration.
 
 [Preview release notes](docs/RELEASE-NOTES.md) record the current scope and remaining live validation. [Audio implementation notes](docs/AUDIO-WIRING.md) explain the CPU audio/tempo regressions. Multichannel analysis uses the first two channels. Live latency, visual fidelity, DPI/fullscreen behavior, and device recovery still require testing on the release candidate.

@@ -15,7 +15,9 @@ import { NERV_SCENES } from './nerv-scenes.ts';
 import { eligiblePresets } from './mpc-preset-eligibility.ts';
 import type { AvsAudioFrame } from './avs/types.ts';
 interface Bridge { postMessage(message: string): void; addEventListener(type: 'message', listener: (event: MessageEvent) => void): void }
-const bridge = (window as unknown as { chrome?: { webview?: Bridge } }).chrome?.webview;
+// Both players run this host. Only media transport and library persistence vary.
+const platform = window as unknown as { chrome?: { webview?: Bridge }; aaavsBridge?: Bridge };
+const bridge = platform.chrome?.webview ?? platform.aaavsBridge;
 const canvas = document.querySelector<HTMLCanvasElement>('#visualizer')!;
 const context = canvas.getContext('2d', { alpha: false })!;
 const timing = document.querySelector<HTMLElement>('#timing')!;

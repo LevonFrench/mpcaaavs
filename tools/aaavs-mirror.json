@@ -1,0 +1,177 @@
+{
+  "version": 1,
+  "directories": [
+    {
+      "source": "visualizer/src",
+      "target": "src"
+    },
+    {
+      "source": "visualizer/nerv-presets",
+      "target": "nerv-presets"
+    }
+  ],
+  "files": [
+    {
+      "source": "visualizer/mpc.html",
+      "target": "mpc.html"
+    },
+    {
+      "source": "visualizer/standalone.html",
+      "target": "standalone.html"
+    },
+    {
+      "source": "visualizer/tools/check-mpc-navigation.mjs",
+      "target": "tools/check-mpc-navigation.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-mpc-selection.mjs",
+      "target": "tools/check-mpc-selection.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-mpc-auto.mjs",
+      "target": "tools/check-mpc-auto.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-mpc-host.mjs",
+      "target": "tools/check-mpc-host.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-mpc-audio-batch.mjs",
+      "target": "tools/check-mpc-audio-batch.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-mpc-safety.mjs",
+      "target": "tools/check-mpc-safety.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-mpc-spectrum.mjs",
+      "target": "tools/check-mpc-spectrum.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-mpc-clock.mjs",
+      "target": "tools/check-mpc-clock.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-mpc-management.mjs",
+      "target": "tools/check-mpc-management.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-mpc-scene-clock.mjs",
+      "target": "tools/check-mpc-scene-clock.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-nerv-scenes.mjs",
+      "target": "tools/check-nerv-scenes.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-nerv-install.mjs",
+      "target": "tools/check-nerv-install.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-nerv-host.mjs",
+      "target": "tools/check-nerv-host.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-nerv-worker.mjs",
+      "target": "tools/check-nerv-worker.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-standalone-player.mjs",
+      "target": "tools/check-standalone-player.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-standalone-library.mjs",
+      "target": "tools/check-standalone-library.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-standalone-catalog.mjs",
+      "target": "tools/check-standalone-catalog.mjs"
+    },
+    {
+      "source": "visualizer/tools/build-standalone.mjs",
+      "target": "tools/build-standalone.mjs"
+    },
+    {
+      "source": "visualizer/tools/install-nerv-presets.mjs",
+      "target": "tools/install-nerv-presets.mjs"
+    },
+    {
+      "source": "visualizer/tools/mpc-transition-raster-check.mjs",
+      "target": "tools/mpc-transition-raster-check.mjs"
+    },
+    {
+      "source": "visualizer/tools/standalone-library.mjs",
+      "target": "tools/standalone-library.mjs"
+    },
+    {
+      "source": "docs/SONG-ANALYSIS-AND-HUD-DRIVERS.md",
+      "target": "docs/SONG-ANALYSIS-AND-HUD-DRIVERS.md"
+    },
+    {
+      "source": "docs/HUD-ANIMATION-BEDS.md",
+      "target": "docs/HUD-ANIMATION-BEDS.md"
+    },
+    {
+      "source": "docs/AAAVS-SHARED-DEVELOPMENT.md",
+      "target": "docs/AAAVS-SHARED-DEVELOPMENT.md"
+    },
+    {
+      "source": "docs/PRESET-MANAGEMENT.md",
+      "target": "docs/PRESET-MANAGEMENT.md"
+    },
+    {
+      "source": "docs/NERV-SCENES.md",
+      "target": "docs/NERV-SCENES.md"
+    },
+    {
+      "source": "docs/AVS-TRANSITIONS.md",
+      "target": "docs/AVS-TRANSITIONS.md"
+    },
+    {
+      "source": "docs/AUDIO-WIRING.md",
+      "target": "docs/AUDIO-WIRING.md"
+    },
+    {
+      "source": "THIRD-PARTY-NERV.txt",
+      "target": "THIRD-PARTY-NERV.txt"
+    },
+    {
+      "source": "THIRD-PARTY-AVS-TRANSITIONS.txt",
+      "target": "THIRD-PARTY-AVS-TRANSITIONS.txt"
+    },
+    {
+      "source": "visualizer/tools/flash-limiter-check.ts",
+      "target": "tools/flash-limiter-check.ts"
+    },
+    {
+      "source": "visualizer/STANDALONE-AGENTS.md",
+      "target": "AGENTS.md"
+    }
+  ],
+  "integration": [
+    "package.json",
+    "tools/serve.mjs",
+    "index.html",
+    ".gitignore",
+    "tools/avs-preset-sources-check.ts"
+  ],
+  "bootstrap": {
+    "src/avs-render.worker.ts": "ae3ac59822bdf0bb4ef00e42bb71151418cb946b4b77c3e328fc8b2fde81839b",
+    "src/avs-worker-protocol.ts": "e313bfb8f8fa08dc1822783f979a3daac5ca6dd14e125162dc15ffcc9fd79f53",
+    "src/clock.ts": "97084b67ed05404ebe4db37eb903f3ef530e76feadecb23db30dabe6a989e11f",
+    "src/flash-gate.ts": "9d73d9cc1e49e9aec8857d2826157207e36d91167e68f1f93f8d9f54cd6fecb7",
+    "src/avs/local-collection.ts": "d46ad87e1850db5defe4de4d569403964725abe55055afd9422b1806a920c559",
+    "src/avs/preset-sources.ts": "cfb33273fc0a9663e0a8155d3f5b9a94ff828d1749ad5c2fa479ea8187d31a98",
+    "src/avs/effects/bitmap-assets.ts": "29e0d3f422d543b52387283e9ae854bee92bb3c10833ce82cec5c4aebf8b76e8",
+    "package.json": "5e65a85569c7e54fd9fdf2f2e61d88ff5f7b13e4261679a4638fda5de627b1c1",
+    "tools/serve.mjs": "207438a73c4eab3524036c74ef78cb48e7c970fbec3140612bc16cb55c147221",
+    "index.html": "b77ece182ca8671f56effc135b2df8855351df78efd9aa9790b241bb57505a4c",
+    ".gitignore": "8280787585164734793dc7cb130f4dff15dbc588757981fdbd66f50f376785be",
+    "tools/avs-preset-sources-check.ts": "5196b9959308593993057260bef6c4e6ff01868aada21dc28cd1a361e9d7f111",
+    "tools/flash-limiter-check.ts": "f90d0def4a5589849056e207301c31738505afbddc58b62d0639b3c76c938d3b"
+  },
+  "scripts": {
+    "build:player": "node tools/build-standalone.mjs",
+    "check:player": "tsc --noEmit && node tools/check-mpc-navigation.mjs && node tools/check-mpc-selection.mjs && node tools/check-mpc-auto.mjs && node tools/check-mpc-host.mjs && node tools/check-mpc-audio-batch.mjs && node tools/check-mpc-safety.mjs && node tools/check-mpc-spectrum.mjs && node tools/check-mpc-clock.mjs && node tools/check-mpc-management.mjs && node tools/check-mpc-scene-clock.mjs && node tools/check-nerv-scenes.mjs && node tools/check-nerv-install.mjs && node tools/check-nerv-host.mjs && node tools/check-nerv-worker.mjs && node tools/check-standalone-player.mjs && node tools/check-standalone-library.mjs && node tools/check-standalone-catalog.mjs"
+  }
+}
