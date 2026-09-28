@@ -153,7 +153,8 @@
     "tools/serve.mjs",
     "index.html",
     ".gitignore",
-    "tools/avs-preset-sources-check.ts"
+    "tools/avs-preset-sources-check.ts",
+    ".gitattributes"
   ],
   "bootstrap": {
     "src/avs-render.worker.ts": "ae3ac59822bdf0bb4ef00e42bb71151418cb946b4b77c3e328fc8b2fde81839b",
@@ -168,7 +169,8 @@
     "index.html": "b77ece182ca8671f56effc135b2df8855351df78efd9aa9790b241bb57505a4c",
     ".gitignore": "8280787585164734793dc7cb130f4dff15dbc588757981fdbd66f50f376785be",
     "tools/avs-preset-sources-check.ts": "5196b9959308593993057260bef6c4e6ff01868aada21dc28cd1a361e9d7f111",
-    "tools/flash-limiter-check.ts": "f90d0def4a5589849056e207301c31738505afbddc58b62d0639b3c76c938d3b"
+    "tools/flash-limiter-check.ts": "f90d0def4a5589849056e207301c31738505afbddc58b62d0639b3c76c938d3b",
+    ".gitattributes": "57c6012cda192e87f79d16ba02c0d63de072b28d4e47156966f1514abe8f7d27"
   },
   "scripts": {
     "build:player": "node tools/build-standalone.mjs",

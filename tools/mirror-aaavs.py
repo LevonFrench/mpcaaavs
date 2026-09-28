@@ -85,6 +85,12 @@ def integration(target: Path, spec: dict) -> dict[str, bytes]:
         ignore += f'\n# Local mirror bookkeeping and rollback snapshots\n/{STATE}\n/.aaavs-mirror-backups/\n'
     result['.gitignore'] = ignore.encode()
 
+    attributes_path = safe(target, '.gitattributes')
+    attributes = attributes_path.read_text(encoding='utf-8') if attributes_path.exists() else ''
+    if '*.nerv text eol=lf' not in attributes:
+        attributes += '\n# Stable preset content identities across Windows checkouts\n*.nerv text eol=lf\n'
+    result['.gitattributes'] = attributes.encode()
+
     # This stock check concerns the historical AVS bank, not NERV manifests.
     check_path = safe(target, 'tools/avs-preset-sources-check.ts')
     check = check_path.read_text(encoding='utf-8')
