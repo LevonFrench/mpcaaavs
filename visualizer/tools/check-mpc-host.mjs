@@ -87,6 +87,16 @@ for(const [id,t] of [...timers]) if(t.at<=now){timers.delete(id);t.fn();}
 assert.equal(stalled.dead,true);assert.equal(fifth.dead,false);
 assert.ok(nodes.get('#status').textContent.includes('timed out'));
 tick();assert.ok(nodes.get('#status').textContent.includes('flash protection unavailable'),'protection failure overrides transient announcements');
+// Rating keys and queued writes target the committed preset, never an incoming one.
+keydown({code:'F7',preventDefault(){}});assert.ok(posted.includes('rate-up'));
+keydown({code:'F6',ctrlKey:true,preventDefault(){}});assert.ok(posted.includes('show-manager'));
+message({type:'rate',delta:1});message({type:'rate',delta:1});
+const request=JSON.parse(posted.filter(m=>m.startsWith('library:')).at(-1).slice(8));
+assert.equal(request.rating,1);assert.equal(request.hash,'2');
+message({type:'rating-saved',entry:{sha256:'2',canonical_path:'presets/unique/test [1 stars].avs',rating:1}});
+const queued=JSON.parse(posted.filter(m=>m.startsWith('library:')).at(-1).slice(8));assert.equal(queued.rating,2);
+message({type:'rating-saved',entry:{sha256:'2',canonical_path:'presets/unique/test [2 stars].avs',rating:2}});
+assert.ok(nodes.get('#status').textContent.includes('filename and Date modified saved'));
 // Teardown invalidates in-flight fetches and closes late transferred frames.
 message({type:'next'});await flush();const teardownFetch=fetches.at(-1);pagehide();assert.equal(live().length,0);
 const late=bitmap();fifth.send('frame',late);assert.equal(late.closed,true);

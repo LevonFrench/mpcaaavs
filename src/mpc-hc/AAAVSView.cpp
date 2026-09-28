@@ -6,6 +6,7 @@
 #include <ks.h>
 #include <ksmedia.h>
 #include "AAAVSView.h"
+#include "AAAVSLibrary.h"
 #include "../DSUtil/AAAVSAudio.h"
 #include "resource.h"
 #include <WebView2.h>
@@ -23,6 +24,45 @@ static std::wstring ProgramFolder() {
     return result.substr(0, result.find_last_of(L"\\/") + 1);
 }
 struct AAAVSView::State {
+    int panel = 0;
+    void Library(const wchar_t* text) {
+        std::string operation;
+        try {
+            const auto request = AAAVSLibrary::Utf8(text);
+            if (request.size() > 4 * 1024 * 1024) throw std::runtime_error("Library request is too large");
+            rapidjson::Document d; d.Parse(request.c_str());
+            if (d.HasParseError() || !d.IsObject() || !d.HasMember("op") || !d["op"].IsString()) throw std::runtime_error("Invalid library request");
+            const std::string op = d["op"].GetString();
+            operation = op;
+            const auto root = std::filesystem::path(ProgramFolder()) / L"visualizer/avs presets";
+            std::string response;
+            if (op == "rate" && d.HasMember("hash") && d["hash"].IsString() && d.HasMember("rating") && d["rating"].IsInt()) {
+                response = "{\"type\":\"rating-saved\",\"entry\":" + AAAVSLibrary::Rate(root, d["hash"].GetString(), d["rating"].GetInt()) + "}";
+            } else if (op == "load-setups") {
+                const auto path = root / L"setups.json"; AAAVSLibrary::NoLinks(path);
+                response = "{\"type\":\"setups-loaded\",\"setups\":" + (std::filesystem::exists(path) ? AAAVSLibrary::Read(path) : "[]") + "}";
+            } else if (op == "save-setups" && d.HasMember("setups") && d["setups"].IsArray() && d["setups"].Size() <= 100) {
+                AAAVSLibrary::AtomicWrite(root / L"setups.json", AAAVSLibrary::Json(d["setups"]));
+                response = "{\"type\":\"setups-saved\"}";
+            } else if (op == "configure" && d.HasMember("settings") && d["settings"].IsObject()) {
+                const auto& v = d["settings"];
+                auto integer = [&](const char* key, int fallback) { return v.HasMember(key) && v[key].IsInt() ? v[key].GetInt() : fallback; };
+                auto boolean = [&](const char* key, bool fallback) { return v.HasMember(key) && v[key].IsBool() ? v[key].GetBool() : fallback; };
+                bars = integer("bars",0); if (bars != 2 && bars != 4 && bars != 8 && bars != 12) bars = 0;
+                transition = std::clamp(integer("transition",1),0,15);
+                beats = integer("beats",0); if (beats != 1 && beats != 2 && beats != 4) beats = 0;
+                durationMs = std::clamp(integer("durationMs",2000),250,8000);
+                automatic=boolean("enabled",true); shuffle=boolean("shuffle",false); keepOld=boolean("keepOld",true);
+                manualFade=boolean("manualFade",true); autoFade=boolean("autoFade",true); Settings(); return;
+            } else throw std::runtime_error("Unknown library request");
+            web->PostWebMessageAsJson(AAAVSLibrary::Wide(response).c_str());
+        } catch (const std::exception& error) {
+            rapidjson::Document result; result.SetObject(); auto& a=result.GetAllocator();
+            result.AddMember("type", "library-error", a); result.AddMember("message", rapidjson::Value(error.what(),a),a);
+            result.AddMember("operation", rapidjson::Value(operation.c_str(),a),a);
+            web->PostWebMessageAsJson(AAAVSLibrary::Wide(AAAVSLibrary::Json(result)).c_str());
+        }
+    }
     HWND parent = nullptr;
     bool started = false, closed = false, visible = false, ready = false, failed = false, shuffle = false, pending = false;
     bool automatic = true, keepOld = true, manualFade = true, autoFade = true, preferencesLoaded = false;
@@ -81,7 +121,20 @@ void AAAVSView::Resize() {
     }
 }
 void AAAVSView::Command(UINT command) {
+    if (command == ID_AAAVS_MANAGER || command == ID_AAAVS_SETUPS) {
+        const int panel = command == ID_AAAVS_MANAGER ? 1 : 2;
+        state->panel = state->panel == panel ? 0 : panel;
+        if (state->panel) state->failed = false;
+        if (state->web && state->ready) {
+            const auto json = L"{\"type\":\"panel\",\"panel\":" + std::to_wstring(state->panel) + L"}";
+            state->web->PostWebMessageAsJson(json.c_str());
+        }
+        return;
+    }
     if (!Ready()) return;
+    if (command == ID_AAAVS_RATE_DOWN || command == ID_AAAVS_RATE_UP) {
+        state->web->PostWebMessageAsJson(command == ID_AAAVS_RATE_UP ? L"{\"type\":\"rate\",\"delta\":1}" : L"{\"type\":\"rate\",\"delta\":-1}"); return;
+    }
     if (command == ID_AAAVS_OPTIONS) { Options(); return; }
     if (command == ID_AAAVS_AUTO) { state->automatic = !state->automatic; state->Settings(); return; }
     if (command == ID_AAAVS_SHUFFLE) {
@@ -93,6 +146,7 @@ void AAAVSView::Command(UINT command) {
 }
 void AAAVSView::Tick(HWND parent, bool visible, bool playing, LONGLONG position) {
     auto s = state;
+    visible = visible || s->panel != 0;
     if (s->closed) return;
     s->parent = parent;
     s->visible = visible;
@@ -147,7 +201,16 @@ void AAAVSView::Tick(HWND parent, bool visible, bool playing, LONGLONG position)
                             if (SUCCEEDED(args->TryGetWebMessageAsString(&message)) && message) {
                                 if (wcscmp(message, L"bootstrap-error") == 0) { s->ready = false; s->failed = false; s->controller->put_IsVisible(s->visible); }
                                 if (wcscmp(message, L"ready") == 0) { s->ready = true; s->failed = false; s->controller->put_IsVisible(s->visible); }
-                                if (wcscmp(message, L"host-ready") == 0) { s->ready = true; s->pending = false; s->Settings(); }
+                                if (wcscmp(message, L"host-ready") == 0) { s->ready = true; s->pending = false; s->Settings(); if (s->panel) { const auto json=L"{\"type\":\"panel\",\"panel\":"+std::to_wstring(s->panel)+L"}";s->web->PostWebMessageAsJson(json.c_str()); } }
+                                if (wcsncmp(message, L"library:", 8) == 0) s->Library(message + 8);
+                                if (wcscmp(message, L"panel-close") == 0) s->panel = 0;
+                                if (wcscmp(message, L"panel-state:0") == 0) s->panel = 0;
+                                if (wcscmp(message, L"panel-state:1") == 0) s->panel = 1;
+                                if (wcscmp(message, L"panel-state:2") == 0) s->panel = 2;
+                                if (wcscmp(message, L"show-manager") == 0) ::PostMessage(GetParent(s->parent), WM_COMMAND, ID_AAAVS_MANAGER, 0);
+                                if (wcscmp(message, L"show-setups") == 0) ::PostMessage(GetParent(s->parent), WM_COMMAND, ID_AAAVS_SETUPS, 0);
+                                if (wcscmp(message, L"rate-up") == 0) ::PostMessage(GetParent(s->parent), WM_COMMAND, ID_AAAVS_RATE_UP, 0);
+                                if (wcscmp(message, L"rate-down") == 0) ::PostMessage(GetParent(s->parent), WM_COMMAND, ID_AAAVS_RATE_DOWN, 0);
                                 if (wcscmp(message, L"options") == 0) ::PostMessage(GetParent(s->parent), WM_COMMAND, ID_AAAVS_OPTIONS, 0);
                                 if (wcscmp(message, L"ack") == 0) s->pending = false;
                                 if (wcscmp(message, L"play-pause") == 0) ::PostMessage(GetParent(s->parent), WM_COMMAND, ID_PLAY_PLAYPAUSE, 0);

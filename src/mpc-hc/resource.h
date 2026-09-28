@@ -7,6 +7,10 @@
 #define ID_AAAVS_SHUFFLE 31002
 #define ID_AAAVS_AUTO 31003
 #define ID_AAAVS_OPTIONS 31004
+#define ID_AAAVS_MANAGER 31005
+#define ID_AAAVS_SETUPS 31006
+#define ID_AAAVS_RATE_DOWN 31007
+#define ID_AAAVS_RATE_UP 31008
 #define IDR_MAINFRAME                   128
 #define IDR_POPUP                       130
 #define IDR_POPUPMAIN                   133

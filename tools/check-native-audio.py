@@ -13,9 +13,10 @@ env = {k.upper(): v for k, v in os.environ.items()}
 for line in environment.splitlines():
     key, sep, value = line.partition('=')
     if sep and key: env[key.upper()] = value
-output = root / '.tmp/audio-check'
+fixture = 'library' if '--library' in sys.argv else 'audio'
+output = root / ('.tmp/' + fixture + '-check')
 output.mkdir(parents=True, exist_ok=True)
 compiler = shutil.which('cl.exe', path=env.get('PATH'))
 if not compiler: sys.exit('C++ compiler missing from Visual Studio environment')
-subprocess.run([compiler, '/nologo', '/std:c++17', '/EHsc', '/W4', '/UNDEBUG', str(root/'tools/check-aaavs-audio.cpp'), '/Fe:check-aaavs-audio.exe', '/Fo:check-aaavs-audio.obj'], cwd=output, env=env, check=True)
-subprocess.run([str(output/'check-aaavs-audio.exe')], cwd=output, env=env, check=True)
+subprocess.run([compiler, '/nologo', '/std:c++17', '/EHsc', '/W4', '/UNDEBUG', str(root/('tools/check-aaavs-' + fixture + '.cpp')), '/Fe:check-aaavs-' + fixture + '.exe', '/Fo:check-aaavs-' + fixture + '.obj'], cwd=output, env=env, check=True)
+subprocess.run([str(output/('check-aaavs-' + fixture + '.exe'))], cwd=output, env=env, check=True)

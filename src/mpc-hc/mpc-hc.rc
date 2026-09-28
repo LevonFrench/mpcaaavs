@@ -1612,6 +1612,8 @@ BEGIN
         MENUITEM "Pla&ylist",                   ID_VIEW_PLAYLIST
         MENUITEM "Captu&re",                    ID_VIEW_CAPTURE
         MENUITEM "Na&vigation",                 ID_VIEW_NAVIGATION
+        MENUITEM "Preset Manager...", ID_AAAVS_MANAGER
+        MENUITEM "Setup Builder...", ID_AAAVS_SETUPS
         POPUP "&Presets..."
         BEGIN
             MENUITEM "&Minimal",                    ID_VIEW_PRESETS_MINIMAL
@@ -1753,6 +1755,8 @@ BEGIN
             MENUITEM "&Next preset", ID_AAAVS_NEXT
             MENUITEM "&Shuffle presets", ID_AAAVS_SHUFFLE
             MENUITEM "&Automatic preset switching", ID_AAAVS_AUTO
+            MENUITEM "Lower preset rating", ID_AAAVS_RATE_DOWN
+            MENUITEM "Raise preset rating", ID_AAAVS_RATE_UP
             MENUITEM "Visualizer &options...", ID_AAAVS_OPTIONS
         END
         MENUITEM "&Options...",                 ID_VIEW_OPTIONS
@@ -2609,6 +2613,10 @@ BEGIN
     ID_AAAVS_SHUFFLE "Visualizer: Shuffle presets"
     ID_AAAVS_AUTO "Visualizer: Automatic preset switching"
     ID_AAAVS_OPTIONS "Visualizer: Options"
+    ID_AAAVS_MANAGER "Visualizer: Preset Manager"
+    ID_AAAVS_SETUPS "Visualizer: Setup Builder"
+    ID_AAAVS_RATE_DOWN "Visualizer: Lower rating"
+    ID_AAAVS_RATE_UP "Visualizer: Raise rating"
 END
 
 STRINGTABLE

@@ -8,6 +8,7 @@ export interface LocalAvsPreset {
   readonly url: string;
   readonly parserStatus: 'lossless' | 'roundtrip-mismatch' | 'parse-error' | 'unknown';
   readonly autoEligible: boolean;
+  readonly rating?: number;
   readonly unavailableReason?: string;
 }
 
@@ -17,6 +18,7 @@ interface LocalCatalogJson {
     readonly bytes?: unknown;
     readonly canonical_path?: unknown;
     readonly display_name?: unknown;
+    readonly rating?: unknown;
   }[];
 }
 
@@ -76,6 +78,7 @@ export function parseLocalAvsCatalog(
       url,
       parserStatus,
       autoEligible: parserStatus !== 'parse-error',
+      rating: typeof entry.rating === 'number' && Number.isInteger(entry.rating) && entry.rating >= 1 && entry.rating <= 5 ? entry.rating : 0,
       ...(unavailableReason ? { unavailableReason } : {}),
     });
   }));

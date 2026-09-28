@@ -30,3 +30,5 @@ jobs:
         with:
           python-version: '3.12'
       - run: python tools/check-native-audio.py
+      - run: git submodule update --init src/thirdparty/rapidjson
+      - run: python tools/check-native-audio.py --library

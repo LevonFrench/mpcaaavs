@@ -13,4 +13,14 @@ body.bootstrap-error #preset{bottom:auto;top:12px}
 body.bootstrap-error #status{bottom:auto;top:60px}
 #retry{position:absolute;left:12px;bottom:12px;padding:8px 12px;font:inherit}
 #retry:focus-visible{outline:2px solid #fff;outline-offset:3px}
-</style></head><body><canvas id="visualizer" tabindex="0" aria-label="Music visualizer. Press Shift F10 for visualizer options."></canvas><div id="timing"></div><div id="preset">Starting AAAVS…</div><div id="status" role="status" aria-live="polite"></div><script type="module" src="dist/mpc-host.js"></script></body></html>
+
+#management{position:absolute;inset:0;z-index:5;background:#202020;color:#e6e6e6;display:flex;flex-direction:column;padding:12px;box-sizing:border-box;overflow:auto}
+#management[hidden]{display:none}#management header{display:flex;align-items:center;gap:8px;flex-wrap:wrap;border-bottom:1px solid #505050;padding-bottom:10px}
+#management h1{font-size:18px;margin:0 auto 0 0}#management h2{font-size:14px;overflow-wrap:anywhere}#management p{overflow-wrap:anywhere}
+#management button,#management input,#management select{font:inherit;color:inherit;background:#303030;border:1px solid #606060;border-radius:2px;padding:6px 8px;min-height:30px}
+#management button{cursor:pointer}#management button:disabled{opacity:.45;cursor:default}#management button:hover:not(:disabled){background:#444}#management :focus-visible{outline:2px solid #36b4dc;outline-offset:2px}
+#management button[aria-pressed=true]{border-color:#36b4dc;background:#33434a}.library-tools{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}.library-tools input{flex:1;min-width:120px}
+.library-columns{display:grid;grid-template-columns:minmax(160px,1fr) minmax(200px,1fr);gap:14px;min-height:160px;flex:1;overflow:hidden}.library-list,.library-detail{overflow:auto;min-width:0;padding:3px}
+#management .preset-row{display:block;width:100%;text-align:left;border-width:0 0 1px;overflow-wrap:anywhere;margin:0;padding:8px}.library-detail label{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:8px 0}.library-detail input:not([type=checkbox]),.library-detail>select{width:100%;box-sizing:border-box}.library-detail ol{padding-left:22px}.library-detail li{margin:8px 0;overflow-wrap:anywhere}.library-detail li button{margin:3px}#management footer{border-top:1px solid #505050;margin-top:10px;font-size:11px}#management footer p{margin:5px 0}
+@media(max-width:480px){.library-columns{display:block;overflow:auto}.library-list{max-height:230px}.library-detail{overflow:visible}#management{padding:8px}}
+</style></head><body><canvas id="visualizer" tabindex="0" aria-label="Music visualizer. Press Shift F10 for visualizer options."></canvas><div id="timing"></div><div id="preset">Starting AAAVS…</div><div id="status" role="status" aria-live="polite"></div><section id="management" hidden role="dialog" aria-label="Preset management"></section><script type="module" src="dist/mpc-host.js"></script></body></html>

@@ -15,7 +15,11 @@ Copy-Item -LiteralPath (Join-Path $appRoot 'visualizer\mpc.html') -Destination $
 Copy-Item -LiteralPath (Join-Path $appRoot 'visualizer\dist') -Destination $destination -Recurse -Force
 $collection = Join-Path $appRoot 'visualizer\avs presets'
 $targetCollection = Join-Path $destination 'avs presets'
+# Existing installations own their renamed presets and catalog. Rebuilds must not
+# overwrite ratings or resurrect pre-rating filenames. New collections are installed once.
+$installed = Test-Path -LiteralPath (Join-Path $targetCollection 'catalog\presets.json')
 foreach ($folder in @('catalog', 'presets', 'dependencies')) {
+    if ($installed -and $folder -ne 'dependencies') { continue }
     New-Item -ItemType Directory -Force $targetCollection | Out-Null
     Copy-Item -LiteralPath (Join-Path $collection $folder) -Destination $targetCollection -Recurse -Force
 }

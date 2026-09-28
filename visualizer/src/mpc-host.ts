@@ -7,6 +7,9 @@ import { PresetNavigation } from './mpc-preset-navigation.ts';
 import { loadPresetBitmaps } from './mpc-bitmap-dependencies.ts';
 import { MpcAutoDirector } from './mpc-auto-director.ts';
 import { AvsTransition, TRANSITIONS } from './mpc-transition.ts';
+import { PresetManagement } from './mpc-management.ts';
+import { setupIndices, stepSetup, type PresetSetup } from './mpc-setups.ts';
+import { localAssetUrl } from './avs/local-assets.ts';
 interface Bridge { postMessage(message: string): void; addEventListener(type: 'message', listener: (event: MessageEvent) => void): void }
 const bridge = (window as unknown as { chrome?: { webview?: Bridge } }).chrome?.webview;
 const canvas = document.querySelector<HTMLCanvasElement>('#visualizer')!;
@@ -14,7 +17,7 @@ const context = canvas.getContext('2d', { alpha: false })!;
 const timing = document.querySelector<HTMLElement>('#timing')!;
 const label = document.querySelector<HTMLElement>('#preset')!;
 const status = document.querySelector<HTMLElement>('#status')!;
-const catalog = await fetchLocalAvsCatalog().catch(error => {
+let catalog = await fetchLocalAvsCatalog().catch(error => {
   label.textContent = 'Visualizer unavailable: preset collection could not be loaded.';
   status.textContent = String(error);
   const retry = document.createElement('button');
@@ -37,6 +40,31 @@ let manualFade = true, autoFade = true, durationMs = 2000;
 let dirty = true, closed = false, lastPresentedPosition = -1;
 let transition: AvsTransition | null = null, transitionStart = 0, transitionDuration = 2;
 const failed = new Set<number>();
+let setupOrder:number[]|null=null;
+const ratings:{index:number;value:number}[]=[];
+const sendLibrary=(value:unknown)=>bridge?.postMessage(`library:${JSON.stringify(value)}`);
+function rate(index:number,value:number){
+  if(!catalog[index])return;
+  value=Math.max(1,Math.min(5,value));
+  const previous=[...ratings].reverse().find(r=>r.index===index)?.value??catalog[index]!.rating??0;
+  if(previous===value)return;
+  ratings.push({index,value});
+  if(ratings.length===1)sendLibrary({op:'rate',hash:catalog[index]!.sha256,rating:ratings[0]!.value});
+}
+function rateCurrent(delta:number){
+  if(!active){announce('Load a preset before rating it.');return;}
+  const index=active.index, pending=[...ratings].reverse().find(r=>r.index===index);
+  rate(index,(pending?.value??catalog[index]!.rating??0)+delta);
+}
+function activateSetup(setup:PresetSetup|null){
+  const order=setup?setupIndices(setup,catalog):null;
+  if(order?.some(i=>!catalog[i]!.autoEligible))throw Error('Remove unavailable presets before activating this setup.');
+  setupOrder=order;cancelPrepared();director.rearm();presets.cancel();
+  if(setup){sendLibrary({op:'configure',settings:setup.settings});if(order?.length)void prepare(order[0]!,false);}
+}
+const management=new PresetManagement({catalog:()=>catalog,current:()=>active?.index??presets.index,
+  settings:()=>({enabled:director.enabled,bars:director.bars,shuffle:presets.shuffle,transition:transitionMode,beats:durationBeats,durationMs:Math.min(8000,durationMs),keepOld,manualFade,autoFade}),
+  load:index=>{director.rearm();void prepare(index,false);},rate,send:sendLibrary,activate:activateSetup,panel:mode=>bridge?.postMessage(`panel-state:${mode}`),close:()=>bridge?.postMessage('panel-close')});
 function announce(text: string) {
   status.textContent = text; document.body.classList.add('announce'); clearTimeout(announceTimer);
   announceTimer = window.setTimeout(() => document.body.classList.remove('announce'), 3500);
@@ -65,7 +93,7 @@ function fail(slot: Slot, reason: string) {
   }
   dirty = true;
   announce(`${catalog[slot.index]!.name}: ${reason}; ${active ? 'keeping current preset' : 'choose another preset'}`);
-  if (!active) bridge?.postMessage('error');
+  if (!active && !management.open) bridge?.postMessage('error');
 }
 function commit() {
   if (!prepared?.bitmap) return;
@@ -76,7 +104,8 @@ function commit() {
   transitionStart = position;
   transitionDuration = durationBeats && director.tempo.locked ? durationBeats * 60 / director.tempo.bpm : durationMs / 1000;
   if (!fade || transitionMode === 15) { dispose(outgoing); outgoing = null; transition = null; }
-  label.textContent = `${active.index + 1} / ${catalog.length} · ${catalog[active.index]!.name}`;
+  label.textContent = `${active.index + 1} / ${catalog.length} · ${catalog[active.index]!.name} ${'★'.repeat(catalog[active.index]!.rating??0)}`;
+  management.refresh();
   dirty = true; announce(`Preset ready: ${catalog[active.index]!.name}`);
   bridge?.postMessage('ready');
 }
@@ -115,6 +144,10 @@ async function prepare(index: number, automatic: boolean) {
   }
 }
 function candidate(): number | null {
+  if(setupOrder){
+    const pool=setupOrder.filter(i=>!failed.has(i)&&catalog[i]!.autoEligible);
+    return stepSetup(pool,presets.index,1,presets.shuffle);
+  }
   const start = presets.shuffle ? Math.floor(Math.random() * catalog.length) : (presets.index + 1) % catalog.length;
   for (let n = 0; n < catalog.length; n++) { const index = (start + n) % catalog.length; if (index !== presets.index && !failed.has(index) && catalog[index]!.autoEligible) return index; }
   return null;
@@ -143,12 +176,25 @@ bridge?.addEventListener('message', event => {
         active?.audio.push(audio); outgoing?.audio.push(audio); prepared?.audio.push(audio);
       }
       const action = director.update(position, playing, pcm, normalized, message.discontinuity === true);
-      if (active && !outgoing && action.prepare && !loading && !prepared) { const index = candidate(); if (index !== null) void prepare(index, true); }
-      if (autoPending && action.switch && prepared?.bitmap) commit();
+      if (!management.open && active && !outgoing && action.prepare && !loading && !prepared) { const index = candidate(); if (index !== null) void prepare(index, true); }
+      if (!management.open && autoPending && action.switch && prepared?.bitmap) commit();
     }
     bridge.postMessage('ack');
+  } else if(message.type==='panel') {management.show(message.panel===1||message.panel===2?message.panel:0);
+  } else if(message.type==='rate') {rateCurrent(message.delta===1?1:-1);
+  } else if(message.type==='rating-saved') {
+    const request=ratings.shift(),entry=message.entry;
+    if(request&&entry?.sha256===catalog[request.index]?.sha256&&typeof entry.canonical_path==='string'&&Number.isInteger(entry.rating)&&entry.rating>=1&&entry.rating<=5){
+      const old=catalog[request.index]!;
+      catalog=catalog.map((p,i)=>i===request.index?{...old,rating:entry.rating,fileName:entry.canonical_path.split('/').at(-1),url:localAssetUrl(entry.canonical_path,'presets',document.baseURI)}:p);
+      if(active?.index===request.index)label.textContent=`${active.index+1} / ${catalog.length} · ${old.name} ${'★'.repeat(entry.rating)}`;
+      announce(`${old.name} · ${'★'.repeat(entry.rating)} · filename and Date modified saved`);management.refresh();
+    }
+    if(ratings.length)sendLibrary({op:'rate',hash:catalog[ratings[0]!.index]!.sha256,rating:ratings[0]!.value});
+  } else if(message.type==='setups-loaded'||message.type==='setups-saved') {management.receive(message.type,message.setups);
+  } else if(message.type==='library-error') {if(message.operation==='rate')ratings.length=0;announce(`Library: ${message.message}`);management.receive(message.type,message.message,message.operation);
   } else if (message.type === 'next' || message.type === 'previous') {
-    director.rearm(); const index = message.type === 'next' ? presets.next() : presets.previous(); void prepare(index, false);
+    director.rearm(); const index = message.type === 'next' ? (setupOrder?candidate():presets.next()) : (setupOrder?stepSetup(setupOrder,presets.index,-1,false):presets.previous()); if(index!==null)void prepare(index, false);
   } else if (message.type === 'shuffle') {
     presets.shuffle = message.enabled === true; if (autoPending) cancelPrepared();
     announce(`Preset shuffle ${presets.shuffle ? 'on' : 'off'}`);
@@ -193,8 +239,13 @@ function frame(now: number) {
   if (fresh && visible) { if (active) render(active); if (outgoing && keepOld) render(outgoing); }
   requestAnimationFrame(frame);
 }
-document.addEventListener('dblclick', () => bridge?.postMessage('fullscreen'));
-document.addEventListener('keydown', event => { if (event.code === 'F10' && event.shiftKey || event.code === 'ContextMenu') { event.preventDefault(); bridge?.postMessage('options'); return; } if (event.code === 'Space' && !event.repeat) { event.preventDefault(); bridge?.postMessage('play-pause'); } });
+document.addEventListener('dblclick', () => {if(!management.open)bridge?.postMessage('fullscreen');});
+document.addEventListener('keydown', event => {
+  if(event.ctrlKey&&!event.altKey&&!event.shiftKey){const command=({F6:'show-manager',F7:'show-setups'} as Record<string,string>)[event.code];if(command){event.preventDefault();if(!event.repeat)bridge?.postMessage(command);return;}}
+  if(!event.ctrlKey&&!event.altKey&&!event.shiftKey&&(event.code==='F6'||event.code==='F7')){event.preventDefault();if(!event.repeat)bridge?.postMessage(event.code==='F7'?'rate-up':'rate-down');return;}
+  if(management.open){if(event.code==='Escape'){event.preventDefault();management.show(0);bridge?.postMessage('panel-close');}return;}
+  if (event.code === 'F10' && event.shiftKey || event.code === 'ContextMenu') { event.preventDefault(); bridge?.postMessage('options'); return; } if (event.code === 'Space' && !event.repeat) { event.preventDefault(); bridge?.postMessage('play-pause'); }
+});
 window.addEventListener('pagehide', () => { closed = true; clearTimeout(announceTimer); cancelPrepared(); dispose(active); dispose(outgoing); });
 bridge?.postMessage('host-ready');
 void prepare(0, false); requestAnimationFrame(frame);
