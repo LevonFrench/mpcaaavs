@@ -209,7 +209,7 @@ async function prepare(index: number, automatic: boolean, clockTarget?:ScenePhas
   } catch (error) {
     if (current !== ticket) return;
     loading = false; pendingIndex=null;pendingClock=false;pendingPhase=null; presets.cancel(); retryAfter = performance.now() + 1000; failed.add(index); announce(`Preset unavailable: ${String(error)}`);
-    if (!active) bridge?.postMessage('error');
+    if (!active && !management.open) bridge?.postMessage('error');
   }
 }
 function candidate(): number | null {

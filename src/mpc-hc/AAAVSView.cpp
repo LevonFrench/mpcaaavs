@@ -215,7 +215,11 @@ void AAAVSView::Tick(HWND parent, bool visible, bool playing, LONGLONG position)
                                 if (wcscmp(message, L"ack") == 0) s->pending = false;
                                 if (wcscmp(message, L"play-pause") == 0) ::PostMessage(GetParent(s->parent), WM_COMMAND, ID_PLAY_PLAYPAUSE, 0);
                                 if (wcscmp(message, L"fullscreen") == 0) ::PostMessage(GetParent(s->parent), WM_COMMAND, ID_VIEW_FULLSCREEN, 0);
-                                if (wcscmp(message, L"error") == 0) { s->failed = true; s->controller->put_IsVisible(FALSE); }
+                                if (wcscmp(message, L"error") == 0) {
+                                    // A preset failure must not dismiss the manager used to recover from it.
+                                    s->failed = s->panel == 0;
+                                    s->controller->put_IsVisible(s->visible && !s->failed);
+                                }
                             }
                             CoTaskMemFree(message); return S_OK;
                         }).Get(), &token);

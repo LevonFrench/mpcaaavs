@@ -14,10 +14,18 @@ let timer=0, now=0, listener, raf, keydown, pagehide, draws=0, probeFailed=false
 Object.defineProperty(globalThis,'performance',{value:{now:()=>now},configurable:true});
 globalThis.fixtureFetch=preset=>new Promise((resolve,reject)=>fetches.push({preset,resolve:()=>resolve(new Uint8Array(4)),reject}));
 const ctx={globalAlpha:1,drawImage(){draws++;},getImageData(){if(probeFailed)throw Error('probe unavailable');return {data:new Uint8ClampedArray(256*144*4)};},save(){},restore(){},beginPath(){},rect(){},clip(){},fillRect(){},createPattern(){return {};}};
+class Element {
+ constructor(tag){this.tagName=tag;this.children=[];this.attributes={};this.textContent='';this.value='';}
+ append(...items){this.children.push(...items);}prepend(...items){this.children.unshift(...items);}
+ replaceChildren(...items){this.children=items;}setAttribute(k,v){this.attributes[k]=v;}
+ addEventListener(_,fn){this.click=fn;}focus(){this.focused=true;}
+ all(){return [this,...this.children.flatMap(c=>c.all())];}
+ querySelector(selector){return this.all().find(e=>selector==='button'?e.tagName==='button':e.tagName==='input'&&e.type==='search');}
+}
 function canvas(){return {width:640,height:360,clientWidth:640,clientHeight:360,getContext(){return {...ctx,canvas:this};}};}
 globalThis.OffscreenCanvas=class {constructor(w,h){Object.assign(this,canvas(),{width:w,height:h});}};
 const classes=new Set();
-globalThis.document={hidden:false,baseURI:'https://aaavs.invalid/mpc.html',body:{append(button){retryButton=button;},classList:{add(x){classes.add(x);},remove(x){classes.delete(x);}}},createElement(tag){return tag==='button'?{addEventListener(_,fn){this.click=fn;},focus(){this.focused=true;}}:canvas();},querySelector(id){if(!nodes.has(id))nodes.set(id,id==='#visualizer'?canvas():{textContent:''});return nodes.get(id);},addEventListener(type,fn){if(type==='keydown')keydown=fn;}};
+globalThis.document={hidden:false,baseURI:'https://aaavs.invalid/mpc.html',body:{append(button){retryButton=button;},classList:{add(x){classes.add(x);},remove(x){classes.delete(x);}}},createElement(tag){return tag==='canvas'?canvas():new Element(tag);},querySelector(id){if(!nodes.has(id))nodes.set(id,id==='#visualizer'?canvas():id==='#management'?new Element('section'):{textContent:''});return nodes.get(id);},addEventListener(type,fn){if(type==='keydown')keydown=fn;}};
 globalThis.window={location:{reload(){reloaded=true;}},chrome:{webview:{postMessage(message){posted.push(message);},addEventListener(_,fn){listener=fn;}}},setTimeout(fn,delay){timers.set(++timer,{fn,at:now+delay});return timer;},addEventListener(type,fn){if(type==='pagehide')pagehide=fn;}};
 globalThis.clearTimeout=id=>timers.delete(id);
 globalThis.requestAnimationFrame=fn=>{raf=fn;};globalThis.devicePixelRatio=1;
@@ -102,6 +110,14 @@ message({type:'next'});await flush();const teardownFetch=fetches.at(-1);pagehide
 const late=bitmap();fifth.send('frame',late);assert.equal(late.closed,true);
 const beforeTeardownResolve=workers.length;teardownFetch.resolve();await flush();assert.equal(workers.length,beforeTeardownResolve);
 const afterTeardown=draws;tick();assert.equal(draws,afterTeardown,'teardown stops pending animation callbacks');
+// An initial fetch failure must not bury a recovery panel opened while loading.
+await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text+'\n// open panel during first load fixture').toString('base64')}`);
+await flush();message({type:'panel',panel:2});
+const errorsBefore=posted.filter(m=>m==='error').length;
+fetches.at(-1).reject(Error('Invalid dependency record'));await flush();
+assert.equal(posted.filter(m=>m==='error').length,errorsBefore,'late fetch failure must not hide Setup Builder');
+assert.equal(nodes.get('#management').hidden,false);assert.ok(nodes.get('#status').textContent.includes('Invalid dependency record'));
+pagehide();
 globalThis.fixtureCatalogFailure=true;
 const beforeBootstrap=workers.length;
 await assert.rejects(import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text+'\n// bootstrap failure fixture').toString('base64')}`), /catalog missing/);

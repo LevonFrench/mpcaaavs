@@ -57,6 +57,8 @@ npm run build
 
 The public renderer build deliberately does not embed historical AVS or bitmap packs. Staging installs the public NERV manifests and also works without a private collection. With your local AVS collection present, run `npm run check:local-catalog` to verify that catalog.
 
+After staging, `node J:/projects/mpcaaavs/visualizer/tools/check-mpc-installed-startup.mjs "J:/projects/mpcaaavs/bin/mpc-hc_x64 Lite/visualizer"` checks the installed host bundle, mixed preset catalog and bitmap loading together on the CPU. It records the worker handoff without executing graphics; it does not replace a live playback check.
+
 Run `python tools/check-native-audio.py` for the CPU PCM fixture. Build scripts discover Visual Studio; `MSBUILD_EXE` can override the native builder path. Run `python tools/build-native.py` for the x64 **Release Lite developer build**, then `tools/stage-aaavs.ps1` to stage the visualizer and local collection alongside `mpc-aaavs.exe`. Double-click `start-mpc-aaavs.cmd` to launch a completed local build. Lite omits internal LAV codecs and uses installed DirectShow codecs (such as K-Lite); a self-contained release needs the full upstream codec build. WebView2 Runtime must be available on the target machine. The staging tool is for local use, not a public redistribution package. On the development machine, the required DirectX support DLL and optional MediaInfo/icon DLLs were copied locally from the existing K-Lite installation, which was left unchanged; these DLLs are not in this repository.
 
 ## Provenance and license

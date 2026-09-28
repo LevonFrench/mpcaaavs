@@ -35,13 +35,40 @@ try{const catalog=JSON.parse(await readFile('avs presets/catalog/presets.json','
 const {loadPresetBitmaps}=await load('src/mpc-bitmap-dependencies.ts');
 const bitmapHash=Buffer.from(await crypto.subtle.digest('SHA-256',valid)).toString('hex');
 const occurrence={package_id:'pack',original_path:'fixture.bmp'};
+const legacy={sha256:digest,canonical_path:'presets/unique/test.avs',occurrences:[occurrence]};
+const nerv={sha256:'a'.repeat(64),canonical_path:'presets/unique/NERV 01 - Boot.nerv',kind:'nerv',scene:'boot'};
+const dependency={sha256:bitmapHash,canonical_path:'dependencies/unique/test.bmp',type:'bmp',occurrences:[occurrence]};
+let fixturePresets=[legacy,nerv], fixtureDependencies=[dependency], bitmapRequests=0;
 globalThis.fetch=async url=>{
  const path=String(url);
- if(path.endsWith('/presets.json'))return Response.json({presets:[{sha256:digest,canonical_path:'presets/unique/test.avs',occurrences:[occurrence]}]});
- if(path.endsWith('/dependencies.json'))return Response.json({dependencies:[{sha256:bitmapHash,canonical_path:'dependencies/unique/test.bmp',type:'bmp',occurrences:[occurrence]}]});
+ if(path.endsWith('/presets.json'))return Response.json({presets:fixturePresets});
+ if(path.endsWith('/dependencies.json'))return Response.json({dependencies:fixtureDependencies});
+ assert.ok(path.endsWith('/dependencies/unique/test.bmp'),'only the package bitmap may be requested');bitmapRequests++;
  return new Response(valid);
 };
-assert.equal((await loadPresetBitmaps(digest)).length,1);
+// Mixed catalogs must not relax legacy origin validation or let manifest entries
+// bypass the shared path/hash boundaries. Failed metadata loads must remain retryable.
+for(const malformed of [
+ {...legacy,occurrences:undefined}, {...legacy,occurrences:{}},
+ {...legacy,occurrences:[{...occurrence,original_path:42}]}, {...legacy,occurrences:Array(1025).fill(occurrence)},
+ {...nerv,sha256:'bad'}, {...nerv,canonical_path:'presets/unique/../escape.nerv'},
+ {...nerv,canonical_path:'presets/unique/NERV.avs'}, {...nerv,scene:'unknown'},
+]){
+ fixturePresets=[malformed];await assert.rejects(loadPresetBitmaps(digest),/Invalid/);
+}
+fixturePresets=[legacy,nerv];
+for(const malformed of [{...dependency,occurrences:undefined},{...dependency,occurrences:[null]},{...dependency,kind:'nerv',scene:'boot',occurrences:undefined}]){
+ fixtureDependencies=[malformed];await assert.rejects(loadPresetBitmaps(digest),/Invalid dependency record/);
+}
+assert.equal(bitmapRequests,0,'invalid metadata must not load bitmap bytes');
+fixtureDependencies=[dependency];
+const aliases=await loadPresetBitmaps(digest);
+assert.equal(aliases.length,1);assert.equal(aliases[0].name,occurrence.original_path);
+assert.deepEqual(new Uint8Array(aliases[0].bytes),valid,'legacy package bitmap survives a mixed AVS/NERV catalog');
+assert.equal(bitmapRequests,1);
+assert.deepEqual(await loadPresetBitmaps(nerv.sha256),[],'NERV manifests have no AVS bitmap package');
+assert.equal(bitmapRequests,1,'NERV bitmap lookup requests no assets');
+console.log('Mixed AVS/NERV catalog: legacy bitmap bytes, manifest isolation, malformed origin/path/hash guards PASS');
 // Decode the available local BMP corpus without workers or GPU to preserve compatibility.
 try {
  const data=JSON.parse(await readFile('avs presets/catalog/dependencies.json','utf8'));

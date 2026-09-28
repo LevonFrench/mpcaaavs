@@ -1,16 +1,24 @@
 import { boundedBytes, boundedJson, localAssetUrl, MAX_ASSET_BYTES, MAX_CATALOG_ENTRIES, verifyDigest } from './avs/local-assets.ts';
+import { NERV_SCENES } from './nerv-scenes.ts';
 interface Occurrence { package_id: string; original_path: string }
-interface RecordEntry { sha256: string; canonical_path: string; occurrences: Occurrence[]; type?: string }
+interface RecordEntry { sha256: string; canonical_path: string; occurrences: Occurrence[]; type?: string; kind?: string; scene?: string }
 function records(value: unknown, key: 'presets' | 'dependencies'): RecordEntry[] {
   const rows = (value as Record<string, unknown> | null)?.[key];
   if (!Array.isArray(rows) || rows.length > MAX_CATALOG_ENTRIES) throw new Error('Invalid dependency catalog');
-  return rows.map((row: RecordEntry) => {
+  return rows.flatMap((row: RecordEntry) => {
     if (!row || typeof row.sha256 !== 'string' || !/^[a-f0-9]{64}$/i.test(row.sha256)
-      || typeof row.canonical_path !== 'string' || !Array.isArray(row.occurrences) || row.occurrences.length > 1024
+      || typeof row.canonical_path !== 'string') throw new Error('Invalid dependency record');
+    localAssetUrl(row.canonical_path, key, base());
+    // Public NERV manifests share the preset catalog but have no legacy package
+    // origins or bitmap dependencies. Do not apply AVS origin rules to them.
+    if (key === 'presets' && row.kind === 'nerv') {
+      if (!row.canonical_path.endsWith('.nerv') || !NERV_SCENES.some(scene => scene === row.scene)) throw new Error('Invalid NERV dependency record');
+      return [];
+    }
+    if (!Array.isArray(row.occurrences) || row.occurrences.length > 1024
       || row.occurrences.some(o => !o || typeof o.package_id !== 'string' || o.package_id.length > 2048
         || typeof o.original_path !== 'string' || o.original_path.length > 2048)) throw new Error('Invalid dependency record');
-    localAssetUrl(row.canonical_path, key, base());
-    return row;
+    return [row];
   });
 }
 function base() { return typeof document === 'undefined' ? 'http://127.0.0.1/' : document.baseURI; }
