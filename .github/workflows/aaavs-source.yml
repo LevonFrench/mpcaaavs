@@ -1,4 +1,4 @@
-name: AAAVS source checks
+name: mpc-hc-aaavs source checks
 on:
   push:
     branches: [aaavs-integration]
@@ -22,6 +22,7 @@ jobs:
         working-directory: visualizer
       - run: npm run build
         working-directory: visualizer
+      - run: python tools/check-release-package.py
   native-audio:
     runs-on: windows-latest
     steps:

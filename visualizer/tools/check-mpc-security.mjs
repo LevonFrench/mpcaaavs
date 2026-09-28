@@ -14,6 +14,9 @@ const payload = new Uint8Array([1,2,3,4]);
 const digest = Buffer.from(await crypto.subtle.digest('SHA-256',payload)).toString('hex');
 const row={sha256:digest.toUpperCase(),bytes:4,display_name:'fixture',canonical_path:'presets/unique/test.avs'};
 const preset=parseLocalAvsCatalog({presets:[row]},{results:[]},base)[0];
+assert.equal(preset.notWorking,false,'legacy catalog presets are not marked broken');
+for(const notWorking of [false,true]){const parsed=parseLocalAvsCatalog({presets:[{...row,notWorking,rating:4}]},{results:[]},base)[0];assert.equal(parsed.notWorking,notWorking);assert.equal(parsed.rating,4);assert.equal(parsed.autoEligible,true,'a user flag does not prevent manual retesting');}
+for(const notWorking of [0,1,'true',null,{}])assert.throws(()=>parseLocalAvsCatalog({presets:[{...row,notWorking}]},{results:[]},base),/Invalid local AVS catalog entry/);
 globalThis.fetch=async()=>new Response(payload);
 assert.equal((await fetchLocalAvsPreset(preset)).length,4);
 await assert.rejects(fetchLocalAvsPreset({...preset,sha256:'0'.repeat(64)}),/SHA-256/);

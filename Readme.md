@@ -1,72 +1,43 @@
-# MPC-AAAVS
+# mpc-hc-aaavs
 
-An experimental fork of [MPC-HC](https://github.com/clsid2/mpc-hc) that places the AAAVS music visualizer in the player's album-art area.
+An independent [MPC-HC](https://github.com/clsid2/mpc-hc) fork with the AAAVS music visualizer embedded in the album-art area. MPC-HC handles decoding and playback; the visualizer receives decoded audio and follows the player's song clock. Video playback keeps the usual video renderer.
 
-The native toolbar adds **previous preset**, **next preset**, **preset shuffle**, and **Auto** beside the playback controls, using MPC-HC's existing themed icons. Track controls keep their usual behavior. Previous walks actual preset history; shuffle chooses random or sequential selection for both manual and automatic switching. Open View > Visualizer > Visualizer options, right-click Auto, or press Shift+F10 inside the visualizer. All visualizer commands can be assigned shortcuts in MPC settings.
+**Preview software for Windows x64.** The current build is Release Lite: it requires compatible installed DirectShow codecs, the Microsoft Edge WebView2 Runtime, and the DirectX End-User Runtime. It is not a self-contained codec bundle or an official MPC-HC release. Native builds and CPU regression checks are separate from live playback and GPU validation.
 
-**Experimental developer build — not a public binary release.** The Windows x64 Release Lite player now compiles successfully with Visual Studio 2022 v143, MFC/ATL, Windows SDK 10, NASM and Yasm. Local UI checks confirmed embedded visualization, previous/next preset selection, shuffle across the full collection, pause, the native Auto options menu, and automatic advancement from preset 1 to 2 on the generated rhythm fixture. The embedded renderer bundle, TypeScript checks, navigation tests and native PCM unit test also pass. These UI observations precede the September 27 agency fixes. Current checks compile the native player and exercise CPU mocks; CI includes JavaScript checks and a Windows PCM fixture, not native playback or GPU rendering.
+Automatic update checks are disabled for this preview. Install future fork builds manually from the repository where you obtained this one; the player does not offer upstream MPC-HC builds as fork updates.
 
-## Musical auto switching and AVS transitions
+## Start
 
-Auto defaults to adaptive 2–12-bar targets. Energy changes can adjust the target until preparation begins; alignment never places an adaptive target more than 12 elapsed bars ahead, although a late-loading preset can delay the actual switch. Fixed 2, 4, 8, and 12 bars are available. A rolling 6–12-second bass/percussion estimator checks one-, two- and four-beat recurrence on the live playback clock; switching waits for a trusted tempo and inferred four-beat bar boundary. These are inferred bars, not song-structure or time-signature recognition. Silence, pauses, seeks, and lost tempo lock rearm or hold the scheduler instead of triggering wall-clock switches.
+Extract the complete portable preview ZIP into a writable folder, install the prerequisites above, and open **mpc-hc-aaavs.exe**. Keep the `visualizer` folder beside the executable. Enable MPC-HC's AudioSwitcher for visualizer audio; bitstream passthrough does not expose decoded PCM. The public package includes **16 NERV scenes** and does not contain a private historical AVS collection.
 
-The audio bridge carries sample rate and valid packet length, normalizes analysis to 44.1 kHz with a streaming windowed-sinc filter, and analyses each available timestamped window once. Spectrum peaks and beat flags are held independently for each preset worker until consumed, so short transients survive between rendered frames; bounded backlog overflow or producer contention resets timing confidence. The next preset is prepared one bar early. The current preset continues rendering while it loads; failed candidates are skipped for the session. Manual selections restart the phrase countdown. At most two preset workers are retained.
+The toolbar adds previous preset, next preset, shuffle, and Auto beside the playback controls. Open **View > Visualizer** for the manager, setup builder, and visualizer options. Playback transport keeps its ordinary function.
 
-All 14 classic AVS transition styles are available, plus random and cut. Default is a two-second cross dissolve; optional 1-, 2-, or 4-beat duration uses the tempo at transition start (selected fixed-duration fallback without a lock). The outgoing preset can keep animating, or freeze to reduce rendering work. Fixed durations from 0.25 to 8 seconds and separate manual/automatic transition toggles are available. Preferences persist through the MPC registry/INI profile. A manual selection while paused presents the new still immediately; pausing an existing fade freezes it. The flash limiter applies after compositing; unreadable samples hold the displayed frame and show a protection-unavailable status. Hidden/unchanged frames avoid redundant composition, and the presentation surface is capped at 1920x1080. This is behavioral emulation, not a claim of pixel-identical Winamp output.
+| Default shortcut | Action |
+| --- | --- |
+| Ctrl+F6 | Open Preset Manager |
+| Ctrl+F7 | Open Setup Builder |
+| F6 / F7 | Lower / raise the displayed preset's rating |
+| F8 | Mark the displayed preset as not working |
+| Escape | Close the management panel |
 
-See [transition implementation notes](docs/AVS-TRANSITIONS.md) and the [upstream notice](THIRD-PARTY-AVS-TRANSITIONS.txt). Automated checks cover timestamped 5 ms pulses, phrase scheduling, host lifecycle mocks, CPU raster geometry for modes 1–13, and all-mode endpoint smoke checks; real-song musical alignment remains a listening-test requirement.
+All visualizer commands are listed with MPC-HC commands in **Options > Player > Keys**. Preset Manager can clear a not-working mark. **Shuffle minimum rating** offers All, 1+, 2+, 3+, 4+, and 5 stars; All includes unrated presets. Not-working presets are excluded from automatic selection. Ratings and failure marks belong to the installed collection, and errors are reported in the interface.
 
-## Architecture
+## Presets, setups, and timing
 
-- MPC-HC remains responsible for decoding, audio output, seeking and transport.
-- A bounded, timestamped PCM tap feeds AAAVS without blocking the audio thread.
-- WebView2 embeds the AAAVS worker in the existing artwork rectangle for audio-only media.
-- Rendering uses the exact AVS compatibility lane with the presentation flash limiter.
-- Video playback retains the original renderer. Failed visualization falls back to artwork.
-- The fork uses a separate executable name, settings location and window class.
+- Browse, search, sort, rate, and load presets in Preset Manager. A rating adds `[N stars]` to the preset filename and updates Date modified while preserving its content identity.
+- Build ordered preset setups with saved shuffle and transition preferences. The [management guide](docs/PRESET-MANAGEMENT.md) explains persistence and recovery.
+- Auto uses inferred four-beat bars with adaptive 2-12-bar or fixed phrase lengths. It waits for a trusted tempo and holds during silence, pauses, and discontinuities. Inferred tempo and bar alignment are not song-structure recognition.
+- Choose from 14 classic AVS transition styles, Random, and Cut; fixed or beat-based durations; and separate manual/automatic transitions. See [transition behavior](docs/AVS-TRANSITIONS.md).
+- **Setup Builder > NERV scene set** supplies 16 scenes with repeatable song-time sequencing. Set BPM, offset, bars per scene, and a shuffle seed. Scene choices can queue for the next timing boundary, including transitions between any two scenes. See [NERV scenes](docs/NERV-SCENES.md).
 
-Broader Windows validation remains: measured audio/visual sync, resize/DPI/fullscreen, video transitions and failure recovery. AudioSwitcher must be enabled; bitstream passthrough provides no PCM. Multichannel analysis currently uses the first two channels.
+Historical AVS packs, bitmap packs, fonts, and APE binaries are **not distributed**. Bring an existing compatible catalog under `visualizer/avs presets/` beside the executable, including `catalog/presets.json`, `catalog/parser-validation.json`, optional `catalog/dependencies.json`, and its referenced preset/dependency files. The host verifies preset bytes and SHA-256 before rendering. Historical APE binaries are never executed. Catalog inclusion does not guarantee faithful support for every legacy effect.
 
-## Presets
+## Build and release
 
-The source includes **16 NERV scene presets** inspired by [bizarro/evangelion](https://github.com/bizarro/evangelion). Open **Setup Builder (Ctrl+F7) > NERV scene set** to activate a sequence with a saved fixed BPM, bar length, offset and shuffle seed. Scene selection and motion follow song time across pause, seek and repeat; the instruments react to live audio. The scenes also work as individually selectable, rateable presets. See [NERV scenes and timing](docs/NERV-SCENES.md) for controls and validation limits.
+Start with the [build guide](docs/BUILDING.md). Maintainers can create a public-only archive using the [release guide](docs/RELEASING.md); the packager creates a SHA-256 inventory and verifies an extracted copy. It does not copy private presets, saved setups, playback history, WebView profiles, debug symbols, or personal configuration.
 
-The development installation uses a **3,409-entry local canonical collection**, including the 124 curated picks. Every local catalog file passed size and SHA-256 verification. Three entries have recorded parser failures. Inclusion in the catalog does not imply faithful rendering of every historical effect.
+[Preview release notes](docs/RELEASE-NOTES.md) record the current scope and remaining live validation. [Audio implementation notes](docs/AUDIO-WIRING.md) explain the CPU audio/tempo regressions. Multichannel analysis uses the first two channels. Live latency, visual fidelity, DPI/fullscreen behavior, and device recovery still require testing on the release candidate.
 
-**Historical AVS packs, third-party bitmap packs, fonts and APE binaries are not distributed in this repository.** Keep your existing AVS collection local, under `visualizer/avs presets/`, with:
+## License and attribution
 
-- `catalog/presets.json`, `catalog/parser-validation.json`, `catalog/dependencies.json`
-- the catalog's `presets/unique/` files
-- the catalog's `dependencies/unique/` files and original notices
-
-The host lazily loads every catalog entry and verifies size and SHA-256 before worker handoff. Canonical paths, streamed byte budgets, and BMP allocation budgets are validated. The budgets exceed the current collection maxima. Package-scoped BMP assets are passed to the existing bitmap resolver. Historical APE binaries are not executed. Missing/unsupported effects, fonts and ambiguous bitmap names may differ from Winamp. Redistribution permissions for the collected packs have not been established; the collection remains Git-ignored.
-
-## Build
-
-Windows x64 is the initial target. Follow [MPC-HC's native build prerequisites](docs/Compilation.md), including Visual Studio 2022 C++ with v143 MFC/ATL and the appropriate Windows SDK. Restore upstream source dependencies with `git submodule update --init --recursive`.
-
-Run `tools/prepare-aaavs.ps1` from PowerShell to download the pinned Microsoft WebView2 SDK, NASM and Yasm, then install/build the JavaScript dependencies. This does not install Visual Studio components or the WebView2 Runtime.
-
-For source checks, enter the `visualizer` directory and run:
-
-```text
-npm ci
-npm run check
-npm run build
-```
-
-The public renderer build deliberately does not embed historical AVS or bitmap packs. Staging installs the public NERV manifests and also works without a private collection. With your local AVS collection present, run `npm run check:local-catalog` to verify that catalog.
-
-After staging, `node J:/projects/mpcaaavs/visualizer/tools/check-mpc-installed-startup.mjs "J:/projects/mpcaaavs/bin/mpc-hc_x64 Lite/visualizer"` checks the installed host bundle, mixed preset catalog and bitmap loading together on the CPU. It records the worker handoff without executing graphics; it does not replace a live playback check.
-
-Run `python tools/check-native-audio.py` for the CPU PCM fixture. Build scripts discover Visual Studio; `MSBUILD_EXE` can override the native builder path. Run `python tools/build-native.py` for the x64 **Release Lite developer build**, then `tools/stage-aaavs.ps1` to stage the visualizer and local collection alongside `mpc-aaavs.exe`. Double-click `start-mpc-aaavs.cmd` to launch a completed local build. Lite omits internal LAV codecs and uses installed DirectShow codecs (such as K-Lite); a self-contained release needs the full upstream codec build. WebView2 Runtime must be available on the target machine. The staging tool is for local use, not a public redistribution package. On the development machine, the required DirectX support DLL and optional MediaInfo/icon DLLs were copied locally from the existing K-Lite installation, which was left unchanged; these DLLs are not in this repository.
-
-## Provenance and license
-
-This branch preserves MPC-HC history and starts from upstream commit `8e1cc8761f8dfb0352779ace61c85774e4705fd5`. AAAVS's TypeScript rendering engine and this native integration are added under the repository's [GPL v3 terms](COPYING.txt); existing third-party source notices remain in their files. Preset and dependency packs are separate from the code and are not covered by that statement.
-
-[MPC-HC's original README](docs/MPC-HC-UPSTREAM-README.md) is preserved. This is an independent experimental fork, not an official MPC-HC release.
-
-Audio wiring and frequency/Auto regression evidence: [AUDIO-WIRING.md](docs/AUDIO-WIRING.md).
-
-Preset ratings, the View-menu Preset Manager, and saved Setup Builder are documented in [Preset management](docs/PRESET-MANAGEMENT.md). Defaults: Ctrl+F6 / Ctrl+F7 for the views, F6 / F7 to lower/raise the current preset rating.
+The fork preserves MPC-HC history and builds on upstream commit `8e1cc8761f8dfb0352779ace61c85774e4705fd5`. Code is distributed under the repository's [GPL v3 terms](COPYING.txt), with existing third-party notices retained. The [original MPC-HC README](docs/MPC-HC-UPSTREAM-README.md), [AVS transition notice](THIRD-PARTY-AVS-TRANSITIONS.txt), and [NERV attribution](THIRD-PARTY-NERV.txt) remain available. Preset and dependency packs have their own terms.

@@ -45,7 +45,8 @@ try {
   renameSync(old, rated);
   const ratingTime = new Date('2026-09-20T12:00:00Z');
   utimesSync(rated, ratingTime, ratingTime);
-  const privatePreset = { sha256: 'f'.repeat(64), bytes: 5, display_name: 'Private preset', canonical_path: 'presets/unique/private [3 stars].avs', rating: 3, ownerMetadata: 'preserved' };
+  entry.notWorking=true;
+  const privatePreset = { sha256: 'f'.repeat(64), bytes: 5, display_name: 'Private preset', canonical_path: 'presets/unique/private [3 stars].avs', rating: 3, notWorking:true, ownerMetadata: 'preserved' };
   catalog.presets.unshift(privatePreset);
   catalog.summary = { privateBankMetadata: 123 };
   writeFileSync(path.join(clean, privatePreset.canonical_path), 'hello');

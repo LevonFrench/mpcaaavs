@@ -10,6 +10,7 @@ export interface LocalAvsPreset {
   readonly parserStatus: 'lossless' | 'roundtrip-mismatch' | 'parse-error' | 'unknown';
   readonly autoEligible: boolean;
   readonly rating?: number;
+  readonly notWorking?: boolean;
   readonly kind?: 'avs' | 'nerv';
   readonly scene?: NervSceneId;
   readonly unavailableReason?: string;
@@ -22,6 +23,7 @@ interface LocalCatalogJson {
     readonly canonical_path?: unknown;
     readonly display_name?: unknown;
     readonly rating?: unknown;
+    readonly notWorking?: unknown;
     readonly kind?: unknown;
     readonly scene?: unknown;
   }[];
@@ -63,7 +65,8 @@ export function parseLocalAvsCatalog(
   return Object.freeze(json.presets.map((entry, index) => {
     if (!entry || typeof entry.sha256 !== 'string' || !/^[0-9a-f]{64}$/i.test(entry.sha256)
       || typeof entry.display_name !== 'string' || entry.display_name.length > 2048 || typeof entry.canonical_path !== 'string'
-      || typeof entry.bytes !== 'number' || !Number.isSafeInteger(entry.bytes) || entry.bytes <= 0 || entry.bytes > MAX_ASSET_BYTES) {
+      || typeof entry.bytes !== 'number' || !Number.isSafeInteger(entry.bytes) || entry.bytes <= 0 || entry.bytes > MAX_ASSET_BYTES
+      || entry.notWorking !== undefined && typeof entry.notWorking !== 'boolean') {
       throw new Error(`Invalid local AVS catalog entry ${index}`);
     }
     const parser = parserByHash.get(entry.sha256.toLowerCase());
@@ -89,6 +92,7 @@ export function parseLocalAvsCatalog(
       parserStatus,
       autoEligible: parserStatus !== 'parse-error',
       rating: typeof entry.rating === 'number' && Number.isInteger(entry.rating) && entry.rating >= 1 && entry.rating <= 5 ? entry.rating : 0,
+      notWorking: entry.notWorking === true,
       ...(unavailableReason ? { unavailableReason } : {}),
     });
   }));

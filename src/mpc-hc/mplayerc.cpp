@@ -713,7 +713,7 @@ void CMPlayerCApp::ReportCmdLineError(LPCTSTR msg)
     }
 
     CStringW line;
-    line.Format(L"MPC-HC: %s\r\n", msg);
+    line.Format(L"mpc-hc-aaavs: %s\r\n", msg);
 
     DWORD dwMode, dwWritten;
     if (::GetConsoleMode(hStdErr, &dwMode)) {
@@ -2394,7 +2394,7 @@ BOOL CMPlayerCApp::InitInstance()
     m_AudioRendererDisplayName_CL = _T("");
 
     if (!__super::InitInstance()) {
-        MessageBoxW(nullptr, L"MPC-HC encountered a problem during initialization", L"MPC-HC", MB_ICONERROR | MB_OK);
+        MessageBoxW(nullptr, L"mpc-hc-aaavs encountered a problem during initialization", L"mpc-hc-aaavs", MB_ICONERROR | MB_OK);
         return FALSE;
     }
 
@@ -2404,24 +2404,24 @@ BOOL CMPlayerCApp::InitInstance()
     try {
         pFrame = DEBUG_NEW CMainFrame;
         if (!pFrame || !pFrame->LoadFrame(IDR_MAINFRAME, WS_OVERLAPPEDWINDOW | FWS_ADDTOTITLE, nullptr, nullptr)) {
-            MessageBoxW(nullptr, L"MPC-HC encountered a problem during initialization", L"MPC-HC", MB_ICONERROR | MB_OK);
+            MessageBoxW(nullptr, L"mpc-hc-aaavs encountered a problem during initialization", L"mpc-hc-aaavs", MB_ICONERROR | MB_OK);
             return FALSE;
         }
     } catch (...) {
-        MessageBoxW(nullptr, L"MPC-HC encountered a problem during initialization", L"MPC-HC", MB_ICONERROR | MB_OK);
+        MessageBoxW(nullptr, L"mpc-hc-aaavs encountered a problem during initialization", L"mpc-hc-aaavs", MB_ICONERROR | MB_OK);
         return FALSE;
     }
 
     m_pMainWnd = pFrame;
     if (!m_pMainWnd) {
-        MessageBoxW(nullptr, L"MPC-HC encountered a problem during initialization", L"MPC-HC", MB_ICONERROR | MB_OK);
+        MessageBoxW(nullptr, L"mpc-hc-aaavs encountered a problem during initialization", L"mpc-hc-aaavs", MB_ICONERROR | MB_OK);
         return FALSE;
     }
 
     try {
         pFrame->m_controls.LoadState();
     } catch (...) {
-        MessageBoxW(nullptr, L"MPC-HC encountered a problem during initialization of its control bars", L"MPC-HC", MB_ICONERROR | MB_OK);
+        MessageBoxW(nullptr, L"mpc-hc-aaavs encountered a problem during initialization of its control bars", L"mpc-hc-aaavs", MB_ICONERROR | MB_OK);
         return FALSE;
     }
 

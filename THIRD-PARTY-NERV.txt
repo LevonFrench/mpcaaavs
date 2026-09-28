@@ -3,7 +3,7 @@ NERV scene design and deterministic timing reference
 https://github.com/bizarro/evangelion
 Derived from https://github.com/mexicat/pdoom-video
 
-MPC-AAAVS adapts the terminal scene vocabulary to its live audio pipeline.
+mpc-hc-aaavs adapts the terminal scene vocabulary to its live audio pipeline.
 No original song, Evangelion footage, logos, or external fonts are included.
 The upstream code license is reproduced below.
 

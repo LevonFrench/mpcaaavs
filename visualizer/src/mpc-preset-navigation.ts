@@ -19,9 +19,15 @@ export class PresetNavigation {
     }
     this.index = index; this.committed = true; this.cancel(); return index;
   }
-  next(): number {
+  next(pool?: readonly number[]): number | null {
     const base = this.requested ?? this.index;
     this.previousCursor = null;
+    if (pool) {
+      const choices = pool.filter(index => index !== base);
+      if (!choices.length) return this.requested = null;
+      if (this.shuffle) return this.requested = choices[Math.floor(this.random() * choices.length)]!;
+      return this.requested = choices.find(index => index > base) ?? choices[0]!;
+    }
     return this.requested = this.shuffle && this.count > 1
       ? (base + 1 + Math.floor(this.random() * (this.count - 1))) % this.count
       : (base + 1) % this.count;

@@ -20,8 +20,16 @@ function Assert-NoLinkedPath([string]$Path) {
     }
 }
 Assert-NoLinkedPath $PlayerDirectory
-$player = Join-Path $PlayerDirectory 'mpc-aaavs.exe'
+$player = Join-Path $PlayerDirectory 'mpc-hc-aaavs.exe'
 if (-not (Test-Path -LiteralPath $player)) { throw "Build the player first: $player" }
+# Carry forward portable preferences once; a renamed installation owns its new INI.
+foreach ($suffix in @('.ini', '.history.ini')) {
+    $oldSettings = Join-Path $PlayerDirectory "mpc-aaavs$suffix"
+    $newSettings = Join-Path $PlayerDirectory "mpc-hc-aaavs$suffix"
+    if ((Test-Path -LiteralPath $oldSettings -PathType Leaf) -and -not (Test-Path -LiteralPath $newSettings)) {
+        Copy-Item -LiteralPath $oldSettings -Destination $newSettings
+    }
+}
 Push-Location (Join-Path $appRoot 'visualizer')
 try {
     & npm.cmd run build:mpc
@@ -57,4 +65,4 @@ if ($LASTEXITCODE -ne 0) { throw 'NERV preset installation failed' }
 Copy-Item -LiteralPath (Join-Path $appRoot 'COPYING.txt') -Destination $PlayerDirectory
 Copy-Item -LiteralPath (Join-Path $appRoot 'THIRD-PARTY-AVS-TRANSITIONS.txt') -Destination $PlayerDirectory -Force
 Copy-Item -LiteralPath (Join-Path $appRoot 'THIRD-PARTY-NERV.txt') -Destination $PlayerDirectory -Force
-Write-Output "Staged AAAVS beside $player"
+Write-Output "Staged mpc-hc-aaavs beside $player"

@@ -2,11 +2,11 @@ import type {LocalAvsPreset} from './avs/local-collection.ts';
 import {parseSetups, type PresetSetup, type SetupSettings} from './mpc-setups.ts';
 import {defaultSceneTiming,type SceneTiming} from './mpc-scene-clock.ts';
 import {TRANSITIONS} from './mpc-transition.ts';
-interface Actions { catalog():readonly LocalAvsPreset[]; current():number; settings():SetupSettings; load(index:number):void; rate(index:number,value:number):void; send(value:unknown):void; activate(setup:PresetSetup|null):void; nervSetup?():PresetSetup; panel(mode:number):void; close():void }
+interface Actions { catalog():readonly LocalAvsPreset[]; current():number; settings():SetupSettings; load(index:number):void; rate(index:number,value:number):void; markNotWorking(index:number,notWorking:boolean):void; setMinimumRating(value:number):void; send(value:unknown):void; activate(setup:PresetSetup|null):void; nervSetup?():PresetSetup; panel(mode:number):void; close():void }
 /** Lazy management view: opening it does not create a renderer or audio context. */
 export class PresetManagement {
   private root:HTMLElement|null=null;
-  private mode=0;private search='';private minimum=0;private sort='name';private page=0;
+  private mode=0;private search='';private minimum=0;private status='all';private sort='name';private page=0;
   private selected=-1;private sets:PresetSetup[]=[];private loaded=false;private pending:PresetSetup[]|null=null;
   private draft:PresetSetup|null=null;private dirty=false;private feedback='';
   constructor(private a:Actions){}
@@ -22,7 +22,7 @@ export class PresetManagement {
     try{
       if(type==='setups-loaded'){this.sets=parseSetups(payload);this.loaded=true;}
       if(type==='setups-saved'&&this.pending){this.sets=this.pending;this.pending=null;this.dirty=JSON.stringify(this.draft)!==JSON.stringify(this.sets.find(s=>s.id===this.draft?.id));this.feedback='Setup saved to disk.';}
-      if(type==='library-error'){if(operation!=='rate')this.pending=null;this.feedback=String(payload);}
+      if(type==='library-error'){if(operation==='save-setups')this.pending=null;this.feedback=String(payload);}
     }catch(error){this.feedback=String(error);}
     this.refresh();
   }
@@ -39,14 +39,16 @@ export class PresetManagement {
     const controls=this.element('div','','library-tools');
     const input=this.element('input');input.type='search';input.placeholder='Search presets';input.value=this.search;input.setAttribute('aria-label','Search presets');
     input.oninput=()=>{this.search=input.value;this.page=0;this.draw();const next=root.querySelector<HTMLInputElement>('input[type=search]');next?.focus();};controls.append(input);
-    const filter=this.element('select');filter.setAttribute('aria-label','Minimum star rating');
-    for(let n=0;n<=5;n++){const o=this.element('option',n?`${n}+ stars`:'All ratings');o.value=String(n);filter.append(o);}filter.value=String(this.minimum);filter.onchange=()=>{this.minimum=Number(filter.value);this.page=0;this.draw();};controls.append(filter);
+    const filter=this.element('select');filter.setAttribute('aria-label','List minimum star rating');
+    for(let n=0;n<=5;n++){const o=this.element('option',n?`Show ${n}+ stars`:'Show all ratings');o.value=String(n);filter.append(o);}filter.value=String(this.minimum);filter.onchange=()=>{this.minimum=Number(filter.value);this.page=0;this.draw();};controls.append(filter);
+    const status=this.element('select');status.setAttribute('aria-label','Preset status');for(const [value,text]of [['all','All statuses'],['working','Not marked broken'],['broken','Marked not working']]){const option=this.element('option',text);option.value=value!;status.append(option);}status.value=this.status;status.onchange=()=>{this.status=status.value;this.page=0;this.draw();};controls.append(status);
     const sort=this.element('select');sort.setAttribute('aria-label','Sort presets');for(const [v,label]of [['name','Name'],['rating','Highest rating']]){const o=this.element('option',label);o.value=v!;sort.append(o);}sort.value=this.sort;sort.onchange=()=>{this.sort=sort.value;this.page=0;this.draw();};controls.append(sort);root.append(controls);
+    const shuffleTools=this.element('div','','library-tools'),shuffleLabel=this.element('label','Shuffle minimum rating '),shuffleFilter=this.element('select');shuffleFilter.setAttribute('aria-label','Shuffle minimum rating');for(let n=0;n<=5;n++){const option=this.element('option',n?`${n}+ stars`:'All ratings, including unrated');option.value=String(n);shuffleFilter.append(option);}shuffleFilter.value=String(this.a.settings().minimumRating);shuffleFilter.onchange=()=>{this.a.setMinimumRating(Number(shuffleFilter.value));};shuffleLabel.append(shuffleFilter);shuffleTools.append(shuffleLabel,this.element('span','Applies to random selection. Marked presets are skipped automatically.'));root.append(shuffleTools);
     const body=this.element('div','','library-columns');const list=this.element('section','','library-list');list.setAttribute('aria-label','Presets');
-    const catalog=this.a.catalog(),matches=catalog.map((p,i)=>({p,i})).filter(({p})=>(p.rating??0)>=this.minimum&&p.name.toLowerCase().includes(this.search.toLowerCase())).sort((a,b)=>this.sort==='rating'?((b.p.rating??0)-(a.p.rating??0)||a.p.name.localeCompare(b.p.name)):a.p.name.localeCompare(b.p.name));
+    const catalog=this.a.catalog(),matches=catalog.map((p,i)=>({p,i})).filter(({p})=>(p.rating??0)>=this.minimum&&(this.status==='all'||this.status==='broken'&&p.notWorking||this.status==='working'&&!p.notWorking)&&p.name.toLowerCase().includes(this.search.toLowerCase())).sort((a,b)=>this.sort==='rating'?((b.p.rating??0)-(a.p.rating??0)||a.p.name.localeCompare(b.p.name)):a.p.name.localeCompare(b.p.name));
     this.page=Math.min(this.page,Math.max(0,Math.ceil(matches.length/60)-1));
     for(const {p,i}of matches.slice(this.page*60,(this.page+1)*60)){
-      const row=this.button(`${p.rating?'★'.repeat(p.rating):'—'}  ${p.name}${i===this.a.current()?' · playing':''}`,()=>{this.selected=i;this.draw();});row.className=i===this.selected?'preset-row selected':'preset-row';row.setAttribute('aria-pressed',String(i===this.selected));list.append(row);
+      const row=this.button(`${p.rating?'★'.repeat(p.rating):'—'}  ${p.name}${p.notWorking?' · not working':''}${i===this.a.current()?' · playing':''}`,()=>{this.selected=i;this.draw();});row.className=i===this.selected?'preset-row selected':'preset-row';row.setAttribute('aria-pressed',String(i===this.selected));list.append(row);
     }
     if(!matches.length)list.append(this.element('p','No presets match.'));
     const paging=this.element('div','','library-tools');paging.append(this.button('Previous',()=>{this.page--;this.draw();},this.page===0),this.element('span',`${matches.length} presets · page ${this.page+1}/${Math.max(1,Math.ceil(matches.length/60))}`),this.button('Next',()=>{this.page++;this.draw();},(this.page+1)*60>=matches.length));list.append(paging);body.append(list);
@@ -54,12 +56,14 @@ export class PresetManagement {
     const selected=catalog[this.selected];
     if(selected){detail.append(this.element('h2',selected.name),this.element('p',selected.fileName??''));
       const stars=this.element('div','','library-tools');for(let n=1;n<=5;n++){const b=this.button(`${n} ★`,()=>this.a.rate(this.selected,n));b.setAttribute('aria-label',`Rate ${n} stars`);b.setAttribute('aria-pressed',String(selected.rating===n));stars.append(b);}detail.append(stars,this.button('Load preset',()=>this.a.load(this.selected),!selected.autoEligible));
+      detail.append(this.button(selected.notWorking?'Clear not-working mark':'Mark not working',()=>this.a.markNotWorking(this.selected,!selected.notWorking)));
+      if(selected.notWorking)detail.append(this.element('p','Marked not working. Skipped by automatic and random selection; Load preset lets you retest it.'));
       if(!selected.autoEligible)detail.append(this.element('p',selected.unavailableReason??'This preset cannot be parsed.'));
       if(this.mode===2)detail.append(this.button('Add to setup',()=>{if(!this.draft)this.newDraft();if(this.draft!.presets.length>=500){this.tell('A setup can hold up to 500 presets.');return;}if(!this.draft!.presets.includes(selected.sha256)){this.draft!.presets.push(selected.sha256);this.dirty=true;}this.draw();}));
     }
     if(this.mode===2)this.builder(detail,catalog);body.append(detail);root.append(body);
-    const foot=this.element('footer');const feedback=this.element('p',this.feedback);feedback.setAttribute('role','status');foot.append(feedback,this.element('p','Current preset rating: F6 lower · F7 raise. Ratings rename the file and update Date modified.'));
-    const help=this.element('details');help.append(this.element('summary','Keyboard shortcuts'),this.element('p','Ctrl+F6 Preset Manager · Ctrl+F7 Setup Builder · F6 / F7 rating · Escape close · Space play/pause · Alt+Enter fullscreen. MPC-HC views use Ctrl+0–9. Options → Player → Keys lists and customizes every player command. Text fields keep their normal typing keys.'));foot.append(help);root.append(foot);
+    const foot=this.element('footer');const feedback=this.element('p',this.feedback);feedback.setAttribute('role','status');foot.append(feedback,this.element('p','Current preset: F6 lower rating · F7 raise rating · F8 mark not working. Ratings rename the file and update Date modified. Clear a not-working mark in the preset details.'));
+    const help=this.element('details');help.append(this.element('summary','Keyboard shortcuts'),this.element('p','Ctrl+F6 Preset Manager · Ctrl+F7 Setup Builder · F6 / F7 rating · F8 mark not working · Escape close · Space play/pause · Alt+Enter fullscreen. mpc-hc-aaavs views use Ctrl+0–9. Options → Player → Keys lists and customizes every player command. Text fields keep their normal typing keys.'));foot.append(help);root.append(foot);
   }
   private builder(detail:HTMLElement,catalog:readonly LocalAvsPreset[]){
     detail.append(this.element('h2','Saved setups'));
@@ -71,8 +75,9 @@ export class PresetManagement {
     const name=this.element('input');name.value=draft.name;name.maxLength=120;name.setAttribute('aria-label','Setup name');name.oninput=()=>{draft.name=name.value;this.dirty=true;};detail.append(name);
     const ordered=this.element('ol');draft.presets.forEach((hash,i)=>{const row=this.element('li');row.append(this.element('span',catalog.find(p=>p.sha256===hash)?.name??'Missing preset'),this.button('↑',()=>{[draft.presets[i-1],draft.presets[i]]=[draft.presets[i]!,draft.presets[i-1]!];this.dirty=true;this.draw();},i===0),this.button('↓',()=>{[draft.presets[i+1],draft.presets[i]]=[draft.presets[i]!,draft.presets[i+1]!];this.dirty=true;this.draw();},i===draft.presets.length-1),this.button('Remove',()=>{draft.presets.splice(i,1);this.dirty=true;this.draw();}));ordered.append(row);});detail.append(ordered);
     if(!draft.presets.length)detail.append(this.element('p','Select presets on the left, then Add to setup.'));
-    const select=(label:string,key:'bars'|'transition'|'beats'|'durationMs',values:readonly (readonly [number,string])[])=>{const wrapper=this.element('label',label);const el=this.element('select');for(const [v,t]of values){const o=this.element('option',t);o.value=String(v);el.append(o);}el.value=String(draft.settings[key]);el.onchange=()=>{draft.settings[key]=Number(el.value);this.dirty=true;};wrapper.append(el);detail.append(wrapper);};
+    const select=(label:string,key:'bars'|'transition'|'beats'|'durationMs'|'minimumRating',values:readonly (readonly [number,string])[])=>{const wrapper=this.element('label',label);const el=this.element('select');el.setAttribute('aria-label',`Setup ${label.toLowerCase()}`);for(const [v,t]of values){const o=this.element('option',t);o.value=String(v);el.append(o);}el.value=String(draft.settings[key]);el.onchange=()=>{draft.settings[key]=Number(el.value);this.dirty=true;};wrapper.append(el);detail.append(wrapper);};
     select('Auto phrase','bars',[[0,'Adaptive: 2–12 bars'],[2,'2 bars'],[4,'4 bars'],[8,'8 bars'],[12,'12 bars']]);select('Transition','transition',TRANSITIONS.map((t,i)=>[i,t] as const));select('Duration','beats',[[0,'Seconds'],[1,'1 beat'],[2,'2 beats'],[4,'4 beats']]);select('Seconds / fallback','durationMs',[[250,'0.25'],[500,'0.5'],[1000,'1'],[2000,'2'],[4000,'4'],[8000,'8']]);
+    select('Shuffle minimum rating','minimumRating',[[0,'All ratings, including unrated'],[1,'1+ stars'],[2,'2+ stars'],[3,'3+ stars'],[4,'4+ stars'],[5,'5 stars']]);
     for(const [key,text]of [['enabled','Auto switching'],['shuffle','Shuffle'],['keepOld','Animate outgoing preset'],['manualFade','Transitions on manual changes'],['autoFade','Transitions on Auto changes']] as const){const label=this.element('label',text),box=this.element('input');box.type='checkbox';box.checked=draft.settings[key];box.onchange=()=>{draft.settings[key]=box.checked;this.dirty=true;};label.prepend(box);detail.append(label);}
     this.timingControls(detail,draft);
     detail.append(this.button('Save setup',()=>{try{if(!draft.presets.length)throw Error('Add at least one preset.');const next=this.sets.filter(s=>s.id!==draft.id);next.push(structuredClone(draft));this.pending=parseSetups(next);this.a.send({op:'save-setups',setups:this.pending});this.feedback='Saving…';this.draw();}catch(e){this.tell(String(e));}},!!this.pending||!this.loaded),this.button('Activate setup',()=>{try{if(!draft.presets.length)throw Error('Add at least one preset.');this.a.activate(parseSetups([draft])[0]!);this.tell(`Active setup: ${draft.name}`);}catch(e){this.tell(String(e));}}),this.button('Use entire library',()=>{this.a.activate(null);this.tell('Using the entire preset library.');}),this.button('Delete saved setup',()=>{if(window.confirm(`Delete saved setup “${draft.name}”? Preset files are kept.`)){this.pending=this.sets.filter(s=>s.id!==draft.id);this.a.send({op:'save-setups',setups:this.pending});this.feedback='Deleting saved setup…';this.draw();}},!!this.pending||!this.sets.some(s=>s.id===draft.id)));

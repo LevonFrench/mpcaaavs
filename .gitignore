@@ -53,6 +53,7 @@ ipch
 /.npm-cache/
 /.tmp/
 /dependencies-restore.log
+/releases/
 /distrib/MPCVR/
 /distrib/x64/MediaInfo.dll
 /distrib/x86/MediaInfo.dll

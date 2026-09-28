@@ -97,6 +97,9 @@ assert.ok(nodes.get('#status').textContent.includes('timed out'));
 tick();assert.ok(nodes.get('#status').textContent.includes('flash protection unavailable'),'protection failure overrides transient announcements');
 // Rating keys and queued writes target the committed preset, never an incoming one.
 keydown({code:'F7',preventDefault(){}});assert.ok(posted.includes('rate-up'));
+keydown({code:'F8',preventDefault(){}});assert.ok(posted.includes('mark-not-working'));
+const marksPosted=posted.filter(m=>m==='mark-not-working').length;
+keydown({code:'F8',repeat:true,preventDefault(){}});assert.equal(posted.filter(m=>m==='mark-not-working').length,marksPosted,'holding F8 must not repeat writes');
 keydown({code:'F6',ctrlKey:true,preventDefault(){}});assert.ok(posted.includes('show-manager'));
 message({type:'rate',delta:1});message({type:'rate',delta:1});
 const request=JSON.parse(posted.filter(m=>m.startsWith('library:')).at(-1).slice(8));

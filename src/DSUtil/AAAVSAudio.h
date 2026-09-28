@@ -1,4 +1,4 @@
-// MPC-AAAVS: bounded, process-local PCM tap. Never blocks the audio thread.
+// mpc-hc-aaavs: bounded, process-local PCM tap. Never blocks the audio thread.
 #pragma once
 #include <mmreg.h>
 #include <ks.h>

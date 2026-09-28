@@ -228,13 +228,9 @@ int UpdateChecker::CompareVersion(const Version& v1, const Version& v2)
 
 bool UpdateChecker::IsAutoUpdateEnabled()
 {
-    int& status = AfxGetAppSettings().nUpdaterAutoCheck;
-
-    if (status == AUTOUPDATE_UNKNOWN) { // First run
-        status = (AfxMessageBox(IDS_UPDATE_CONFIG_AUTO_CHECK, MB_ICONQUESTION | MB_YESNO, 0) == IDYES) ? AUTOUPDATE_ENABLE : AUTOUPDATE_DISABLE;
-    }
-
-    return (status == AUTOUPDATE_ENABLE);
+    // This preview is a separate application; upstream releases replace the visualizer fork.
+    // Do not prompt on first launch or use a previously saved upstream update preference.
+    return false;
 }
 
 bool UpdateChecker::IsTimeToAutoUpdate()
@@ -286,10 +282,9 @@ static UINT RunCheckForUpdateThread(LPVOID pParam)
 
 void UpdateChecker::CheckForUpdate(bool autoCheck /*= false*/)
 {
-    CAutoLock lock(&csIsCheckingForUpdate);
-
-    if (!bIsCheckingForUpdate) {
-        bIsCheckingForUpdate = true;
-        AfxBeginThread(RunCheckForUpdateThread, (LPVOID)autoCheck);
+    if (!autoCheck) {
+        AfxMessageBox(L"mpc-hc-aaavs preview has no built-in updater.\n\n"
+                      L"Check the repository where you downloaded mpc-hc-aaavs for new releases.",
+                      MB_OK | MB_ICONINFORMATION);
     }
 }

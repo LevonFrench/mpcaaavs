@@ -44,7 +44,7 @@ public:
     explicit CatalogLock(const fs::path& root) {
         const auto path=root/L"catalog/ratings.lock";NoLinks(path);
         handle=CreateFileW(path.c_str(),GENERIC_WRITE,0,nullptr,OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
-        if(handle==INVALID_HANDLE_VALUE)throw std::runtime_error("Another preset rating is being saved; try again");
+        if(handle==INVALID_HANDLE_VALUE)throw std::runtime_error("Another preset change is being saved; try again");
     }
     ~CatalogLock(){CloseHandle(handle);}
 };
@@ -94,6 +94,24 @@ inline std::string Rate(const fs::path& root, const std::string& hash, int ratin
             if (ec) throw std::runtime_error("Save failed and rollback needs attention; rated file remains on disk");
             throw;
         }
+        return Json(entry);
+    }
+    throw std::runtime_error("Unknown preset");
+}
+inline std::string SetNotWorking(const fs::path& root, const std::string& hash, bool notWorking) {
+    if (!std::regex_match(hash, std::regex("[0-9a-f]{64}"))) throw std::runtime_error("Invalid preset status request");
+    NoLinks(root); const auto catalog = root / L"catalog/presets.json"; NoLinks(catalog);
+    CatalogLock lock(root);
+    rapidjson::Document doc; doc.Parse(Read(catalog).c_str());
+    if (doc.HasParseError() || !doc.IsObject() || !doc.HasMember("presets") || !doc["presets"].IsArray()) throw std::runtime_error("Invalid preset catalog");
+    for (auto& entry : doc["presets"].GetArray()) {
+        if (!entry.IsObject() || !entry.HasMember("sha256") || !entry["sha256"].IsString() || hash != entry["sha256"].GetString()) continue;
+        if (!entry.HasMember("canonical_path") || !entry["canonical_path"].IsString()) throw std::runtime_error("Missing preset path");
+        // Status also helps recover a missing preset; do not require or touch its file.
+        PresetPath(root, entry["canonical_path"].GetString());
+        if (entry.HasMember("notWorking")) entry["notWorking"].SetBool(notWorking);
+        else entry.AddMember("notWorking", notWorking, doc.GetAllocator());
+        AtomicWrite(catalog, Json(doc));
         return Json(entry);
     }
     throw std::runtime_error("Unknown preset");

@@ -38,6 +38,8 @@ struct AAAVSView::State {
             std::string response;
             if (op == "rate" && d.HasMember("hash") && d["hash"].IsString() && d.HasMember("rating") && d["rating"].IsInt()) {
                 response = "{\"type\":\"rating-saved\",\"entry\":" + AAAVSLibrary::Rate(root, d["hash"].GetString(), d["rating"].GetInt()) + "}";
+            } else if (op == "set-not-working" && d.HasMember("hash") && d["hash"].IsString() && d.HasMember("notWorking") && d["notWorking"].IsBool()) {
+                response = "{\"type\":\"not-working-saved\",\"entry\":" + AAAVSLibrary::SetNotWorking(root, d["hash"].GetString(), d["notWorking"].GetBool()) + "}";
             } else if (op == "load-setups") {
                 const auto path = root / L"setups.json"; AAAVSLibrary::NoLinks(path);
                 response = "{\"type\":\"setups-loaded\",\"setups\":" + (std::filesystem::exists(path) ? AAAVSLibrary::Read(path) : "[]") + "}";
@@ -52,6 +54,7 @@ struct AAAVSView::State {
                 transition = std::clamp(integer("transition",1),0,15);
                 beats = integer("beats",0); if (beats != 1 && beats != 2 && beats != 4) beats = 0;
                 durationMs = std::clamp(integer("durationMs",2000),250,8000);
+                minimumRating = std::clamp(integer("minimumRating",0),0,5);
                 automatic=boolean("enabled",true); shuffle=boolean("shuffle",false); keepOld=boolean("keepOld",true);
                 manualFade=boolean("manualFade",true); autoFade=boolean("autoFade",true); Settings(); return;
             } else throw std::runtime_error("Unknown library request");
@@ -66,12 +69,13 @@ struct AAAVSView::State {
     HWND parent = nullptr;
     bool started = false, closed = false, visible = false, ready = false, failed = false, shuffle = false, pending = false;
     bool automatic = true, keepOld = true, manualFade = true, autoFade = true, preferencesLoaded = false;
-    int bars = 0, transition = 1, beats = 0, durationMs = 2000;
+    int bars = 0, transition = 1, beats = 0, durationMs = 2000, minimumRating = 0;
     ULONGLONG retryAt = 0;
     void Preferences(bool save) {
         auto app = AfxGetApp(); if (!app) return;
         auto value = [&](LPCWSTR key, int current) { if (save) { app->WriteProfileInt(L"AAAVS", key, current); return current; } return int(app->GetProfileInt(L"AAAVS", key, current)); };
         automatic = value(L"Auto", automatic) != 0; shuffle = value(L"Shuffle", shuffle) != 0;
+        minimumRating = std::clamp(value(L"MinimumRating", minimumRating), 0, 5);
         keepOld = value(L"KeepOld", keepOld) != 0; manualFade = value(L"ManualFade", manualFade) != 0; autoFade = value(L"AutoFade", autoFade) != 0;
         bars = value(L"Bars", bars); if (bars != 2 && bars != 4 && bars != 8 && bars != 12) bars = 0;
         transition = value(L"Transition", transition); if (transition < 0 || transition > 15) transition = 1;
@@ -82,7 +86,7 @@ struct AAAVSView::State {
     void InitializationFailed() {
         ready = false; started = false; failed = true; pending = false; retryAt = GetTickCount64() + 5000;
         if (controller) controller->Close(); web.Reset(); controller.Reset();
-        OutputDebugString(L"MPC-AAAVS: initialization failed; retrying in five seconds.\n");
+        OutputDebugString(L"mpc-hc-aaavs: initialization failed; retrying in five seconds.\n");
     }
     void Settings() {
         Preferences(true);
@@ -91,6 +95,7 @@ struct AAAVSView::State {
         json << L"{\"type\":\"settings\",\"enabled\":" << (automatic ? L"true" : L"false")
              << L",\"bars\":" << bars << L",\"transition\":" << transition << L",\"beats\":" << beats
              << L",\"shuffle\":" << (shuffle ? L"true" : L"false")
+             << L",\"minimumRating\":" << minimumRating
              << L",\"manualFade\":" << (manualFade ? L"true" : L"false") << L",\"autoFade\":" << (autoFade ? L"true" : L"false")
              << L",\"durationMs\":" << durationMs
              << L",\"keepOld\":" << (keepOld ? L"true" : L"false") << L"}";
@@ -134,6 +139,9 @@ void AAAVSView::Command(UINT command) {
     if (!Ready()) return;
     if (command == ID_AAAVS_RATE_DOWN || command == ID_AAAVS_RATE_UP) {
         state->web->PostWebMessageAsJson(command == ID_AAAVS_RATE_UP ? L"{\"type\":\"rate\",\"delta\":1}" : L"{\"type\":\"rate\",\"delta\":-1}"); return;
+    }
+    if (command == ID_AAAVS_NOT_WORKING) {
+        state->web->PostWebMessageAsJson(L"{\"type\":\"not-working\"}"); return;
     }
     if (command == ID_AAAVS_OPTIONS) { Options(); return; }
     if (command == ID_AAAVS_AUTO) { state->automatic = !state->automatic; state->Settings(); return; }
@@ -211,6 +219,7 @@ void AAAVSView::Tick(HWND parent, bool visible, bool playing, LONGLONG position)
                                 if (wcscmp(message, L"show-setups") == 0) ::PostMessage(GetParent(s->parent), WM_COMMAND, ID_AAAVS_SETUPS, 0);
                                 if (wcscmp(message, L"rate-up") == 0) ::PostMessage(GetParent(s->parent), WM_COMMAND, ID_AAAVS_RATE_UP, 0);
                                 if (wcscmp(message, L"rate-down") == 0) ::PostMessage(GetParent(s->parent), WM_COMMAND, ID_AAAVS_RATE_DOWN, 0);
+                                if (wcscmp(message, L"mark-not-working") == 0) ::PostMessage(GetParent(s->parent), WM_COMMAND, ID_AAAVS_NOT_WORKING, 0);
                                 if (wcscmp(message, L"options") == 0) ::PostMessage(GetParent(s->parent), WM_COMMAND, ID_AAAVS_OPTIONS, 0);
                                 if (wcscmp(message, L"ack") == 0) s->pending = false;
                                 if (wcscmp(message, L"play-pause") == 0) ::PostMessage(GetParent(s->parent), WM_COMMAND, ID_PLAY_PLAYPAUSE, 0);
@@ -264,7 +273,7 @@ void AAAVSView::Tick(HWND parent, bool visible, bool playing, LONGLONG position)
 
 void AAAVSView::Options() {
     if (!Ready()) return;
-    HMENU menu = CreatePopupMenu(), phrases = CreatePopupMenu(), effects = CreatePopupMenu(), durations = CreatePopupMenu();
+    HMENU menu = CreatePopupMenu(), phrases = CreatePopupMenu(), effects = CreatePopupMenu(), durations = CreatePopupMenu(), ratings = CreatePopupMenu();
     const int bars[] = {0, 2, 4, 8, 12};
     const wchar_t* phraseNames[] = {L"Adaptive (2-12 bars)", L"2 bars", L"4 bars", L"8 bars", L"12 bars"};
     for (int i = 0; i < 5; ++i) AppendMenuW(phrases, MF_STRING | (state->bars == bars[i] ? MF_CHECKED : 0), 1 + i, phraseNames[i]);
@@ -274,6 +283,9 @@ void AAAVSView::Options() {
     const wchar_t* durationsText[] = {L"Classic (2 seconds)", L"1 beat", L"2 beats", L"4 beats"};
     for (int i = 0; i < 4; ++i) AppendMenuW(durations, MF_STRING | (state->beats == beats[i] ? MF_CHECKED : 0), 40 + i, durationsText[i]);
     AppendMenuW(menu, MF_STRING | (state->automatic ? MF_CHECKED : 0), 50, L"Automatic preset switching");
+    const wchar_t* ratingNames[] = {L"All ratings (including unrated)", L"1 star or higher", L"2 stars or higher", L"3 stars or higher", L"4 stars or higher", L"5 stars"};
+    for (int i = 0; i < 6; ++i) AppendMenuW(ratings, MF_STRING | (state->minimumRating == i ? MF_CHECKED : 0), 70 + i, ratingNames[i]);
+    AppendMenuW(menu, MF_POPUP, (UINT_PTR)ratings, L"Shuffle minimum rating");
     AppendMenuW(menu, MF_POPUP, (UINT_PTR)phrases, L"Phrase length");
     AppendMenuW(menu, MF_POPUP, (UINT_PTR)effects, L"AVS transition");
     AppendMenuW(menu, MF_POPUP, (UINT_PTR)durations, L"Transition duration");
@@ -290,6 +302,7 @@ void AAAVSView::Options() {
     if (choice >= 20 && choice <= 35) state->transition = choice - 20;
     if (choice >= 40 && choice <= 43) { state->beats = beats[choice - 40]; if (choice == 40) state->durationMs = 2000; }
     if (choice >= 60 && choice <= 65) { state->beats = 0; state->durationMs = milliseconds[choice - 60]; }
+    if (choice >= 70 && choice <= 75) state->minimumRating = choice - 70;
     if (choice == 52) state->manualFade = !state->manualFade;
     if (choice == 53) state->autoFade = !state->autoFade;
     if (choice == 50) state->automatic = !state->automatic;

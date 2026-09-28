@@ -6,7 +6,7 @@ Radar, Harmonics, Seele, Battery, AT Field, Alert, Entry Plug, Target, Tokyo-3,
 Sync, Berserk, Impact and End. Each has a different instrument layout; they share
 terminal typography, hazard strips, stereo scopes and a full-band spectrum rail.
 They are Canvas2D scene presets, not AVS binaries or the original Three.js video.
-The upstream MIT notice is preserved in `J:/projects/mpcaaavs/THIRD-PARTY-NERV.txt`.
+The upstream MIT notice is preserved in `THIRD-PARTY-NERV.txt`.
 No original music, precomputed song analysis, fonts or logos are included.
 
 ## Use
@@ -52,9 +52,14 @@ management panel defers scene selection until the panel is closed.
 Scene selection, local animation time and seeded shuffle are derived directly
 from MPC-HC media time. Pause does not advance them. A seek or repeat reconstructs
 the appropriate scene without playing through earlier scenes; late loads enter at
-the current song position. Between manual choices, shuffle visits every preset
+the current song position. Between manual choices, shuffle visits every eligible preset
 once per cycle and avoids adjacent repeats across cycles (a singleton naturally
 repeats). An explicit choice can repeat the currently playing scene.
+
+Not-working marks are excluded from timed selection. With Shuffle enabled, the
+minimum shuffle rating also applies. Changing ratings, marks, or that threshold
+can change the eligible sequence; queued choices that no longer qualify are cleared.
+An empty eligible pool holds the current display and reports the filter condition.
 
 Clocked NERV changes use the existing AVS transition styles: dissolve, pushes,
 wipes, blocks, squeeze, dots, **Random**, or **Cut**. Random style and block order
@@ -83,8 +88,8 @@ export or original song-specific cue sheet is added.
 
 ## Packaging and verification
 
-`J:/projects/mpcaaavs/visualizer/nerv-presets/` contains data-only manifests. The
-installer at `J:/projects/mpcaaavs/visualizer/tools/install-nerv-presets.mjs` merges
+`visualizer/nerv-presets/` contains data-only manifests. The
+installer at `visualizer/tools/install-nerv-presets.mjs` merges
 them into an absolute target collection by SHA-256. Staging installs the pack even
 without a private AVS collection. Existing rated filenames, timestamps, setups and
 private entries are preserved. Local startup still verifies each manifest's size

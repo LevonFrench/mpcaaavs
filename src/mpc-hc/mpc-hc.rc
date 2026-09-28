@@ -1757,6 +1757,7 @@ BEGIN
             MENUITEM "&Automatic preset switching", ID_AAAVS_AUTO
             MENUITEM "Lower preset rating", ID_AAAVS_RATE_DOWN
             MENUITEM "Raise preset rating", ID_AAAVS_RATE_UP
+            MENUITEM "Mark preset not working", ID_AAAVS_NOT_WORKING
             MENUITEM "Visualizer &options...", ID_AAAVS_OPTIONS
         END
         MENUITEM "&Options...",                 ID_VIEW_OPTIONS
@@ -2617,6 +2618,7 @@ BEGIN
     ID_AAAVS_SETUPS "Visualizer: Setup Builder"
     ID_AAAVS_RATE_DOWN "Visualizer: Lower rating"
     ID_AAAVS_RATE_UP "Visualizer: Raise rating"
+    ID_AAAVS_NOT_WORKING "Visualizer: Mark preset not working"
 END
 
 STRINGTABLE

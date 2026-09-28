@@ -42,6 +42,7 @@
     <SoxrSrcRoot Condition="'$(SoxrSrcRoot)'==''">$(MSBuildThisFileDirectory)..\soxr\libsoxr\src</SoxrSrcRoot>
     <SoxrSrc>$([MSBuild]::EnsureTrailingSlash('$(SoxrSrcRoot)'))</SoxrSrc>
     <MpcBinRoot Condition="'$(MpcBinRoot)'==''">$(MSBuildThisFileDirectory)..\..\..\bin</MpcBinRoot>
+    <MpcSourceRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..\..'))</MpcSourceRoot>
     <MpcBin>$([MSBuild]::EnsureTrailingSlash('$(MpcBinRoot)'))</MpcBin>
     <LavArch Condition="'$(Platform)'=='x64'">64</LavArch>
     <LavArch Condition="'$(Platform)'=='Win32'">32</LavArch>
@@ -61,6 +62,8 @@
       <PreprocessorDefinitions Condition="'$(Platform)'=='x64'">WIN64=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <PreprocessorDefinitions Condition="'$(Platform)'=='Win32'">WIN32=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalOptions>-wd4018 -wd4146 -wd4244 -wd4305 -wd4554 -utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <!-- av_assert0 uses __FILE__ even in Release. Keep checkout paths out of shipped diagnostics. -->
+      <AdditionalOptions Condition="'$(Configuration)'=='Release'">/experimental:deterministic /pathmap:&quot;$(MpcSourceRoot)=mpc-hc-aaavs&quot; %(AdditionalOptions)</AdditionalOptions>
       <Optimization>MaxSpeed</Optimization>
       <OmitFramePointers Condition="'$(Platform)'=='Win32'">false</OmitFramePointers>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
