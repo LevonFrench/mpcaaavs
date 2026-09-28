@@ -59,17 +59,36 @@ audio(4.86,true,{epoch:2,frames});tick();assert.ok(Math.max(...lastRender(active
 audio(6.1,true,{epoch:2});await flush();const canceled=fetches.at(-1),before=workers.length;
 msg({type:'settings',enabled:false,shuffle:false});canceled.resolve();await flush();assert.equal(workers.length,before);assert.equal(active.dead,false);
 msg({type:'settings',enabled:true,shuffle:false});await flush();active=await load();assert.ok(nodes.get('#preset').textContent.includes('radar'));
-// Manual transport holds its selection until explicit reactivation.
-msg({type:'next'});await flush();active=await load();assert.ok(nodes.get('#preset').textContent.includes('harmonics'));
-audio(20,false,{epoch:2});await flush();tick();active.send('frame');assert.ok(nodes.get('#timing').textContent.includes('held'));assert.ok(nodes.get('#preset').textContent.includes('harmonics'));
+// NERV transport and arbitrary choices queue at the next clock boundary.
+msg({type:'next'});await flush();const superseded=await load();assert.ok(nodes.get('#preset').textContent.includes('radar'),'preloading must not change the active scene');
+msg({type:'next'});await flush();assert.equal(fetches.at(-1).p.scene,'seele','repeated Next steps from the pending choice');
+const replaced=fetches.at(-1);actions.load(13);await flush();replaced.resolve();await flush();
+assert.equal(superseded.dead,true);const queued=await load();assert.ok(nodes.get('#preset').textContent.includes('radar'));
+assert.equal(lastRender(queued).nerv.localTime,0,'lookahead initializes the incoming scene at its boundary');
+for(const time of [6.6,7.1,7.6])audio(time,false,{epoch:2});tick();active.send('frame');
+assert.ok(nodes.get('#timing').textContent.includes('queued NERV berserk'));
+const queuedIdle=count(queued);tick();assert.equal(count(queued),queuedIdle,'pause does not execute the queued transition');
+// Refresh held audio/time at the boundary. Multiple bridge polls before the reply
+// must not commit the old preloaded bitmap with a future request's timestamp.
+audio(8.1,true,{epoch:2});assert.equal(count(queued),queuedIdle+1);
+audio(8.12,true,{epoch:2});assert.ok(nodes.get('#preset').textContent.includes('radar'),'wait for completed boundary frame');
+queued.send('frame');active=queued;assert.ok(nodes.get('#preset').textContent.includes('berserk'));assert.equal(lastRender(active).nerv.previousScene,'radar');
+const cueFrame=structuredClone(lastRender(active).nerv);
+audio(7.1,false,{epoch:2});await flush();await load();audio(8.1,false,{epoch:2});await flush();active=await load();assert.deepEqual(lastRender(active).nerv,cueFrame,'queued pair and transition replay after seeking');
+audio(10.25,false,{epoch:2});await flush();active=await load();assert.ok(nodes.get('#preset').textContent.includes('impact'),'ordered clock continues after the chosen scene');
+// Auto-off selections remain immediate; reactivation clears session cues.
+msg({type:'settings',enabled:false,shuffle:false});actions.load(4);await flush();active=await load();assert.ok(nodes.get('#preset').textContent.includes('harmonics'));
+audio(20,false,{epoch:2});tick();active.send('frame');
 actions.activate(setup);await flush();active=await load();assert.ok(nodes.get('#preset').textContent.includes('target'));
 // Cut and frozen outgoing scene settings are honored on repeatable fades.
 msg({type:'settings',enabled:true,shuffle:false,transition:15,beats:1,keepOld:false});audio(20.25);tick();active.send('frame');assert.equal(lastRender(active).nerv.previousScene,undefined);
 msg({type:'settings',enabled:true,shuffle:false,transition:1,beats:1,keepOld:false});tick();assert.equal(lastRender(active).nerv.previousLocalTime,2);active.send('frame');
+// Existing transition style/duration controls feed the absolute clock, including Random.
+for(const mode of [0,2,6,10,14]){msg({type:'settings',enabled:true,shuffle:false,transition:mode,beats:4});tick();assert.equal(lastRender(active).nerv.transitionMode,mode);assert.equal(lastRender(active).nerv.blend,.125,'four beats uses full scene duration, not quarter-scene cap');active.send('frame');}
 // Clock change back to displayed A invalidates pending B (without a media seek).
 audio(22.1);await flush();const wrong=fetches.at(-1);const currentCount=workers.length;
 const reordered=structuredClone(setup);[reordered.presets[10],reordered.presets[11]]=[reordered.presets[11],reordered.presets[10]];
 actions.activate(reordered);wrong.resolve();await flush();assert.equal(workers.length,currentCount);active=await load();
 pagehide();assert.ok(workers.every(w=>w.dead));
 assert.ok(draws>0);
-console.log('NERV host: 16-scene template, worker dispatch, absolute clock, direct/repeat/paused seeks, stale frame rejection, full-band holds, Auto cancellation, manual hold, Cut/frozen fade, teardown PASS');
+console.log('NERV host: absolute clock, seek/replay, held spectrum, queued choices/replacement, lookahead/late-frame isolation, Auto cancellation, all-style timing/duration, Cut/frozen geometry, teardown PASS');

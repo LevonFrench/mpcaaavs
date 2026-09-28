@@ -1,7 +1,7 @@
 import {build} from 'esbuild';
 import assert from 'node:assert/strict';
 async function load(path){const result=await build({entryPoints:[path],bundle:true,format:'esm',write:false});return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);}
-const {sceneAt,parseSceneTiming,validateSceneTiming,defaultSceneTiming}=await load('src/mpc-scene-clock.ts');
+const {sceneAt,scheduleSceneCue,MAX_SCENE_CUES,parseSceneTiming,validateSceneTiming,defaultSceneTiming}=await load('src/mpc-scene-clock.ts');
 const {parseSetups,defaultSettings}=await load('src/mpc-setups.ts');
 const timing={...defaultSceneTiming,enabled:true},order=[8,2,7,4];
 const snapshot=JSON.stringify({timing,order});
@@ -54,6 +54,62 @@ for(let count=1;count<=16;count++)for(const seed of [0,1,27,4294967295]){
 }
 assert.notDeepEqual(Array.from({length:32},(_,i)=>sceneAt(i*16,order,{...timing,seed:5},true).index),Array.from({length:32},(_,i)=>sceneAt(i*16,order,{...timing,seed:17},true).index),'seed affects the sequence');
 
+// Any NERV scene can cue any other scene on the same musical boundary. The
+// outgoing scene and local transition time are recoverable after arbitrary seeks.
+const nervOrder=Array.from({length:16},(_,i)=>i*7+3);
+for(const shuffle of [false,true])for(const source of nervOrder)for(const target of nervOrder.filter(index=>index!==source)){
+  const history=[{ordinal:2,index:source}],phase=sceneAt(35,nervOrder,timing,shuffle,history);
+  const cues=scheduleSceneCue(history,phase,target),snapshot=JSON.stringify(cues);
+  assert.deepEqual(cues,[{ordinal:2,index:source},{ordinal:3,index:target}]);
+  assert.equal(sceneAt(48-1e-5,nervOrder,timing,shuffle,cues).index,source,'a manual cue must wait for the boundary');
+  const boundary=sceneAt(48,nervOrder,timing,shuffle,cues);
+  assert.equal(boundary.index,target);assert.equal(boundary.previousIndex,source);assert.equal(boundary.localTime,0);
+  assert.equal(boundary.start,48);assert.equal(boundary.ordinal,3);assert.equal(boundary.duration,16);
+  const frames=[48,50,47,8000,48,0,50].map(position=>sceneAt(position,nervOrder,timing,shuffle,cues));
+  [48,50,47,8000,48,0,50].forEach((position,i)=>assert.deepEqual(sceneAt(position,nervOrder,timing,shuffle,cues),frames[i],'cue replay must not depend on traversal order'));
+  if(!shuffle)assert.equal(sceneAt(64,nervOrder,timing,shuffle,cues).index,nervOrder[(nervOrder.indexOf(target)+1)%16],'ordered cues continue from the chosen scene');
+  assert.equal(JSON.stringify(cues),snapshot);assert.deepEqual(history,[{ordinal:2,index:source}]);
+}
+// Each cued shuffle cycle remains a full permutation, with no automatic repeats
+// within or across cycles, including the two-preset and singleton edge cases.
+for(let count=1;count<=16;count++)for(const seed of [0,1,29,4294967295]){
+  const indices=nervOrder.slice(0,count),config={...timing,seed};
+  for(const target of indices){
+    const cues=[{ordinal:7,index:target}];let previous;
+    for(let cycle=0;cycle<8;cycle++){
+      const seen=[];
+      for(let n=0;n<count;n++){
+        const phase=sceneAt((7+cycle*count+n)*16,indices,config,true,cues);seen.push(phase.index);
+        if(previous!==undefined&&count>1)assert.notEqual(phase.index,previous,'cued shuffle cannot repeat across cycles');
+        if(previous!==undefined)assert.equal(phase.previousIndex,previous);
+        previous=phase.index;
+      }
+      assert.deepEqual([...seen].sort((a,b)=>a-b),indices);
+    }
+    assert.equal(sceneAt(112,indices,config,true,cues).index,target,'the chosen scene anchors the cued shuffle');
+  }
+}
+const originalCues=[{ordinal:1,index:8},{ordinal:4,index:2},{ordinal:9,index:7}];
+const requeued=scheduleSceneCue(originalCues,{ordinal:3},4);
+assert.deepEqual(requeued,[{ordinal:1,index:8},{ordinal:4,index:4},{ordinal:9,index:7}],'reselecting while paused replaces only the next boundary cue');
+assert.deepEqual(originalCues,[{ordinal:1,index:8},{ordinal:4,index:2},{ordinal:9,index:7}]);
+assert.notEqual(requeued[0],originalCues[0],'queued history is copied');
+assert.deepEqual(scheduleSceneCue(originalCues,{ordinal:2},4),[{ordinal:1,index:8},{ordinal:3,index:4},{ordinal:4,index:2},{ordinal:9,index:7}]);
+assert.deepEqual(sceneAt(70,order,timing,false,[]),sceneAt(70,order,timing,false),'reactivating with an empty history restores the saved sequence');
+const offsetTiming={...timing,bpm:109,offsetSeconds:2.75,barsPerScene:12};
+const offsetPhase=sceneAt(31,order,offsetTiming,false),offsetCues=scheduleSceneCue([],offsetPhase,4);
+const due=offsetTiming.offsetSeconds+(offsetPhase.ordinal+1)*offsetPhase.duration;
+assert.equal(sceneAt(due-1e-5,order,offsetTiming,false,offsetCues).index,offsetPhase.index);
+assert.equal(sceneAt(due,order,offsetTiming,false,offsetCues).index,4,'cues retain exact BPM, bar length and offset');
+for(const cues of [null,{},[{ordinal:-1,index:8}],[{ordinal:0.5,index:8}],[{ordinal:Infinity,index:8}],[{ordinal:2,index:8},{ordinal:1,index:2}],[{ordinal:2,index:8},{ordinal:2,index:2}],[{ordinal:2,index:-1}],[{ordinal:2,index:2.5}],[{ordinal:2,index:999}]]){
+  assert.throws(()=>sceneAt(70,order,timing,false,cues));
+}
+for(const [phase,target] of [[{ordinal:-1},8],[{ordinal:1.5},8],[{ordinal:Infinity},8],[{ordinal:Number.MAX_SAFE_INTEGER},8],[{ordinal:1},-1],[{ordinal:1},1.5]])assert.throws(()=>scheduleSceneCue([],phase,target));
+const fullCues=Array.from({length:MAX_SCENE_CUES},(_,ordinal)=>({ordinal,index:order[ordinal%order.length]}));
+assert.equal(scheduleSceneCue(fullCues,{ordinal:2},7).length,MAX_SCENE_CUES,'a full history can still replace a pending cue');
+assert.throws(()=>scheduleSceneCue(fullCues,{ordinal:MAX_SCENE_CUES},7),'never discard replay history when full');
+assert.throws(()=>sceneAt(70,order,timing,false,[...fullCues,{ordinal:MAX_SCENE_CUES,index:7}]));
+
 const hash='a'.repeat(64),legacy={id:'legacy',name:'Legacy',presets:[hash],settings:defaultSettings};
 assert.deepEqual(parseSetups([legacy])[0].timing,defaultSceneTiming);
 assert.notEqual(parseSceneTiming(undefined),defaultSceneTiming,'default is copied for editing');
@@ -100,4 +156,4 @@ const savedPicker=field('Saved setups');savedPicker.value='nerv';savedPicker.onc
 assert.equal(field('Song BPM').value,'92');assert.equal(field('First scene offset (seconds)').value,'1.25');assert.equal(field('Shuffle seed').value,'28');
 const requestsBefore=requests.length;set('Song BPM','');click('Save setup');assert.equal(requests.length,requestsBefore,'invalid timing must never be sent to disk');
 assert.ok(root.all().some(e=>e.textContent.includes('Scene timing requires')));
-console.log('Scene clock CPU: musical boundaries, seeks/replays/pauses, seeded cycles, no boundary repeats, malformed inputs, legacy setup defaults, saved clock round trip and builder actions PASS');
+console.log('Scene clock CPU: musical boundaries, all 240 any-to-any NERV cues, queued replacement, deterministic seeks/replays/pauses, seeded cycles without boundary repeats, bounded cue history, malformed inputs, legacy setup defaults, saved clock round trip and builder actions PASS');

@@ -8,13 +8,41 @@ export function blockOrder(random = Math.random) {
   for (let i = 8; i > 0; i--) { const j = Math.floor(random() * (i + 1)); [blocks[i], blocks[j]] = [blocks[j]!, blocks[i]!]; }
   return blocks;
 }
+type TransitionCanvas = HTMLCanvasElement | OffscreenCanvas;
+type TransitionContext = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
+export interface AvsTransitionOptions {
+  /** A stable boundary identity makes Random and block order reproducible after seeks. */
+  readonly seed?: number;
+  /** Worker callers provide OffscreenCanvas; regular player transitions retain HTML canvases. */
+  readonly createCanvas?: () => TransitionCanvas;
+}
+function seededRandom(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let value = Math.imul(state ^ state >>> 15, state | 1);
+    value ^= value + Math.imul(value ^ value >>> 7, value | 61);
+    return ((value ^ value >>> 14) >>> 0) / 4294967296;
+  };
+}
+function context2d(canvas: TransitionCanvas): TransitionContext {
+  const context = canvas.getContext('2d') as TransitionContext | null;
+  if (!context) throw Error('Transition canvas unavailable');
+  return context;
+}
 export class AvsTransition {
-  private mask = document.createElement('canvas');
-  private tile = document.createElement('canvas');
-  readonly order = blockOrder();
+  private mask: TransitionCanvas;
+  private tile: TransitionCanvas;
+  readonly order: number[];
   readonly mode: number;
-  constructor(mode: number) { this.mode = mode === 0 ? 1 + Math.floor(Math.random() * 14) : mode; }
-  draw(ctx: CanvasRenderingContext2D, old: CanvasImageSource, next: CanvasImageSource, progress: number, w: number, h: number) {
+  constructor(mode: number, options: AvsTransitionOptions = {}) {
+    const createCanvas = options.createCanvas ?? (() => document.createElement('canvas'));
+    this.mask = createCanvas(); this.tile = createCanvas();
+    const random = options.seed === undefined ? Math.random : seededRandom(options.seed);
+    this.order = blockOrder(random);
+    this.mode = mode === 0 ? 1 + Math.floor(random() * 14) : mode;
+  }
+  draw(ctx: TransitionContext, old: CanvasImageSource, next: CanvasImageSource, progress: number, w: number, h: number) {
     const t = Math.max(0, Math.min(1, progress)), s = transitionProgress(t);
     ctx.globalAlpha = 1; ctx.imageSmoothingEnabled = false;
     const draw = (source: CanvasImageSource, x = 0, y = 0, width = w, height = h) => ctx.drawImage(source, x, y, width, height);
@@ -56,9 +84,9 @@ export class AvsTransition {
         // AVS's stepped, repeating dot grid (not stochastic noise).
         const spacing = (1 << Math.max(0, 4 - Math.floor(s * 5))) + 1;
         this.tile.width = this.tile.height = spacing;
-        const tc = this.tile.getContext('2d')!; tc.fillStyle = '#fff'; tc.fillRect(spacing - 1, spacing - 1, 1, 1);
+        const tc = context2d(this.tile); tc.fillStyle = '#fff'; tc.fillRect(spacing - 1, spacing - 1, 1, 1);
         this.mask.width = w; this.mask.height = h;
-        const mc = this.mask.getContext('2d')!;
+        const mc = context2d(this.mask);
         mc.drawImage(next, 0, 0, w, h); mc.globalCompositeOperation = 'destination-in';
         mc.fillStyle = mc.createPattern(this.tile, 'repeat')!; mc.fillRect(0, 0, w, h);
         draw(this.mask); break;

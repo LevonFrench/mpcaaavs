@@ -10,6 +10,8 @@ export interface NervPlaybackFrame extends Omit<NervSceneFrame, 'scene' | 'audio
   readonly previousLocalTime?: number;
   readonly previousTime?: number;
   readonly blend?: number;
+  readonly transitionMode?: number;
+  readonly transitionSeed?: number;
 }
 
 export interface AvsWorkerLoadMessage {

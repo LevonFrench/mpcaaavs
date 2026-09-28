@@ -17,7 +17,9 @@ No original music, precomputed song analysis, fonts or logos are included.
    **Shuffle seed**. The template uses the current trusted tempo if available;
    otherwise it starts at 120 BPM. That value is a user-adjustable fixed clock,
    not a claim about the track's actual BPM.
-4. Keep **Auto switching** and **Follow the song clock** enabled. Choose
+4. Choose any **Transition** style and its **Duration** using the existing setup
+   controls. These effects follow the same song clock as the scene changes.
+5. Keep **Auto switching** and **Follow the song clock** enabled. Choose
    **Activate setup** and close the panel. **Save setup** retains the list and
    timing configuration for later activation.
 
@@ -32,28 +34,40 @@ add them to other setups, or use ordinary adaptive Auto. **F6/F7** lower/raise
 the current preset's rating. Ratings rename its `.nerv` file with `[N stars]`
 and update Date modified using the same native transaction as `.avs` ratings.
 
-Manual previous/next or **Load preset** holds the chosen scene and suspends the
-fixed sequence. Activate the setup again, or switch Auto off and back on, to
-resume at the scene corresponding to the current song position. Opening a
-management panel defers automatic scene selection until the panel is closed.
+With the song clock and Auto enabled, manual previous/next or **Load preset**
+queues a NERV scene from the active setup for the next scene boundary. Any NERV
+scene in that setup can follow any other: no special pairs or fixed storyboard
+are required. Further choices before that boundary replace the queued choice.
+The ordered or seeded sequence continues
+from the selected scene. Choices replay at the same song positions when seeking
+or repeating within the current session; they are not added to the saved setup.
+Activating a setup clears the session choices and restores its saved sequence at
+the current song position. Turn Auto off to change scenes immediately. Loading a
+legacy AVS preset or one outside the active setup still holds the fixed sequence;
+activate the setup again, or switch Auto off and back on, to resume it. Opening a
+management panel defers scene selection until the panel is closed.
 
 ## Clock and audio contract
 
 Scene selection, local animation time and seeded shuffle are derived directly
 from MPC-HC media time. Pause does not advance them. A seek or repeat reconstructs
 the appropriate scene without playing through earlier scenes; late loads enter at
-the current song position. Shuffle visits every preset once per cycle and avoids
-adjacent repeats across cycles (a singleton naturally repeats).
+the current song position. Between manual choices, shuffle visits every preset
+once per cycle and avoids adjacent repeats across cycles (a singleton naturally
+repeats). An explicit choice can repeat the currently playing scene.
 
-Clocked NERV changes use a repeatable crossfade, or **Cut**. Duration uses the
-configured number of beats at the fixed BPM, or the fixed seconds setting, capped
-at one quarter of a scene. Auto-transition off also cuts. Turning off outgoing
-animation freezes the outgoing geometry at its boundary time; both sides still
-receive the current live audio. Other AVS transition styles remain available for
-manual changes and ordinary adaptive Auto. A direct seek into a fade reconstructs
-both NERV plates. Mixed AVS/NERV fixed-clock setups have deterministic selection,
-but use cuts where the previous/current scene is not a NERV plate; historical AVS
-internal state is not reconstructed.
+Clocked NERV changes use the existing AVS transition styles: dissolve, pushes,
+wipes, blocks, squeeze, dots, **Random**, or **Cut**. Random style and block order
+derive from the saved seed and scene boundary, so seeking back reconstructs the
+same transition. Duration uses the configured number of beats at the fixed BPM,
+or the fixed seconds setting, capped at one scene's duration to prevent overlapping
+transitions. Auto-transition off also cuts. Turning off outgoing animation freezes
+the outgoing geometry at
+its boundary time; both sides still receive the current live audio. A direct seek
+into a transition reconstructs both NERV plates and the effect's current progress.
+Mixed AVS/NERV fixed-clock setups have deterministic selection, but use cuts where
+the previous/current scene is not a NERV plate; historical AVS internal state is
+not reconstructed.
 
 Instruments consume the existing normalized 44.1 kHz stereo PCM and 576-byte AVS
 spectrum arrays. Separate spectrum peak holds preserve a transient that occurs
@@ -79,7 +93,7 @@ and digest before handoff, then validates its format/version/scene ID in the wor
 CPU checks cover all 16 distinct drawing streams, finite geometry, seeded replay,
 low/mid/high and stereo input, song-clock boundaries, setup persistence, native
 rating rollback, installer idempotence, malformed manifests, host seek/load races,
-paused redraws, Auto cancellation and worker crossfades. Native Release Lite builds
+paused redraws, Auto cancellation and worker transitions. Native Release Lite builds
 and the staged bundle are separate from live acceptance. The player/browser/GPU
 were deliberately not launched during this change; visual legibility, pacing and
 integrated runtime performance still need an audition.

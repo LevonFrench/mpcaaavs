@@ -89,6 +89,6 @@ export class PresetManagement {
     };
     number('Song BPM','bpm',20,400,'0.01');number('First scene offset (seconds)','offsetSeconds',-3600,3600,'0.01');number('Bars per scene','barsPerScene',1,128,'1');number('Shuffle seed','seed',0,4294967295,'1');
     detail.append(this.element('p','A positive offset holds the opening scene until that time. A negative offset starts partway through the sequence. Shuffle repeats the same seeded order on every replay.'));
-    detail.append(this.element('p','Timed NERV changes use repeatable crossfades, or Cut when selected. Manual changes retain the selected transition style. Next, Previous or Load preset holds the scene clock; activate the setup again or turn Auto off and on to resume.'));
+    detail.append(this.element('p','Timed NERV changes use the Transition and Duration controls above, including seeded Random effects. With the song clock and Auto on, Next, Previous or Load preset queues a NERV scene from this setup for the next scene boundary. The latest choice wins; the sequence continues from there. Turn Auto off for immediate changes. Loading a preset outside this setup holds the scene clock.'));
   }
 }

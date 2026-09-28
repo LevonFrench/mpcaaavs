@@ -10,7 +10,7 @@ import { AvsTransition, TRANSITIONS } from './mpc-transition.ts';
 import { PresetManagement } from './mpc-management.ts';
 import { setupIndices, stepSetup, type PresetSetup } from './mpc-setups.ts';
 import { localAssetUrl } from './avs/local-assets.ts';
-import { defaultSceneTiming, parseSceneTiming, sceneAt, type SceneTiming } from './mpc-scene-clock.ts';
+import { defaultSceneTiming, parseSceneTiming, sceneAt, scheduleSceneCue, type SceneTiming, type ScenePhase, type SessionSceneCue } from './mpc-scene-clock.ts';
 import { NERV_SCENES } from './nerv-scenes.ts';
 import type { AvsAudioFrame } from './avs/types.ts';
 interface Bridge { postMessage(message: string): void; addEventListener(type: 'message', listener: (event: MessageEvent) => void): void }
@@ -47,17 +47,39 @@ let setupOrder:number[]|null=null;
 let sceneTiming:SceneTiming={...defaultSceneTiming}, sequenceSuspended=false, clockRevision=0;
 let pendingIndex:number|null=null;
 let pendingClock=false;
+let pendingPhase:ScenePhase|null=null, sceneCues:SessionSceneCue[]=[];
 const silence=():AvsAudioFrame=>({waveform:[new Uint8Array(576),new Uint8Array(576)],spectrum:[new Uint8Array(576),new Uint8Array(576)],beat:false,beatLevel:0});
 let latestAudio=silence();
-function clockPhase(){return director.enabled&&!sequenceSuspended&&setupOrder?sceneAt(position,setupOrder,sceneTiming,presets.shuffle):null;}
+function clockPhase(at=position){return director.enabled&&!sequenceSuspended&&setupOrder?sceneAt(at,setupOrder,sceneTiming,presets.shuffle,sceneCues):null;}
 function manualSelection(index:number){
+  const phase=clockPhase();
+  if(phase&&catalog[phase.index]?.kind==='nerv'&&catalog[index]?.kind==='nerv'&&setupOrder?.includes(index)){
+    if(failed.has(index)){announce('This scene could not be loaded; choose another preset.');return;}
+    try{sceneCues=scheduleSceneCue(sceneCues,phase,index);}catch(error){announce(String(error));return;}
+    clockRevision++;syncSceneClock();
+    announce(`Queued: ${catalog[index]!.name} · next scene boundary`);return;
+  }
   sequenceSuspended=sceneTiming.enabled;clockRevision++;director.rearm();void prepare(index,false);
 }
 function syncSceneClock(){
   const phase=clockPhase();
-  if(pendingClock&&(!phase||phase.index!==pendingIndex))cancelPrepared();
+  const next=phase?clockPhase(phase.start+phase.duration):null;
+  // Retain lookahead only while it still matches the next absolute boundary.
+  if(pendingClock&&(!phase||!pendingPhase||!(phase.ordinal===pendingPhase.ordinal&&phase.index===pendingIndex||next?.ordinal===pendingPhase.ordinal&&next.index===pendingIndex)))cancelPrepared();
   if(!phase||management.open||!hostVisible||document.hidden)return;
-  if(active?.index!==phase.index&&pendingIndex!==phase.index&&!failed.has(phase.index))void prepare(phase.index,false);
+  if(pendingClock&&pendingPhase?.ordinal===phase.ordinal&&prepared?.bitmap){
+    if(prepared.busy)return;
+    // A preloaded image is never presented with its future time-zero audio.
+    if(prepared.renderedPosition<phase.start||prepared.renderRevision!==clockRevision){render(prepared);return;}
+    commit();
+  }
+  if(active?.index!==phase.index){
+    if(pendingIndex!==phase.index&&!failed.has(phase.index))void prepare(phase.index,false,phase);
+    return;
+  }
+  const queued=sceneCues.some(c=>c.ordinal===phase.ordinal+1);
+  const lookahead=Math.min(2,240/sceneTiming.bpm,phase.duration/4);
+  if(next&&catalog[phase.index]?.kind==='nerv'&&catalog[next.index]?.kind==='nerv'&&next.index!==phase.index&&!loading&&!prepared&&!outgoing&&!failed.has(next.index)&&(queued||phase.duration-phase.localTime<=lookahead))void prepare(next.index,true,next);
 }
 const ratings:{index:number;value:number}[]=[];
 const sendLibrary=(value:unknown)=>bridge?.postMessage(`library:${JSON.stringify(value)}`);
@@ -79,13 +101,13 @@ function activateSetup(setup:PresetSetup|null){
   const nextTiming=parseSceneTiming(setup?.timing);
   if(setup&&!order?.length)throw Error('Add at least one preset before activating this setup.');
   if(order?.some(i=>!catalog[i]!.autoEligible))throw Error('Remove unavailable presets before activating this setup.');
-  setupOrder=order;sceneTiming=nextTiming;sequenceSuspended=false;clockRevision++;cancelPrepared();director.rearm();presets.cancel();
+  setupOrder=order;sceneTiming=nextTiming;sceneCues=[];sequenceSuspended=false;clockRevision++;cancelPrepared();director.rearm();presets.cancel();
   if(setup){
     director.configure(setup.settings.enabled,setup.settings.bars);presets.shuffle=setup.settings.shuffle;
     transitionMode=setup.settings.transition;durationBeats=setup.settings.beats;durationMs=setup.settings.durationMs;
     keepOld=setup.settings.keepOld;manualFade=setup.settings.manualFade;autoFade=setup.settings.autoFade;
     sendLibrary({op:'configure',settings:setup.settings});
-    if(order?.length)void prepare(clockPhase()?.index??order[0]!,false);
+    if(order?.length)void prepare(clockPhase()?.index??order[0]!,false,clockPhase()??undefined);
   }
 }
 const management=new PresetManagement({catalog:()=>catalog,current:()=>active?.index??presets.index,
@@ -102,21 +124,25 @@ function announce(text: string) {
 function dispose(slot: Slot | null) {
   if (!slot) return; slot.dead = true; clearTimeout(slot.timeout); slot.worker.terminate(); slot.bitmap?.close(); slot.bitmap = null;
 }
-function cancelPrepared() { ticket++; loading = false; pendingIndex=null;pendingClock=false; dispose(prepared); prepared = null; autoPending = false; }
+function cancelPrepared() { ticket++; loading = false; pendingIndex=null;pendingClock=false;pendingPhase=null; dispose(prepared); prepared = null; autoPending = false; }
 function render(slot: Slot) {
   if (slot.dead || slot.busy || !slot.ready) return;
+  const phase=clockPhase();
+  if(slot===active&&phase&&phase.index!==slot.index)return;
   slot.busy = true;
   const data = pcm.slice().buffer;
   const width = 640, height = Math.max(64, Math.min(640, Math.round(width * canvas.clientHeight / Math.max(1, canvas.clientWidth))));
   const isNerv=catalog[slot.index]!.kind==='nerv';
-  const phase=clockPhase(), clocked=phase?.index===slot.index?phase:null;
+  const clocked=slot===prepared&&pendingClock&&pendingPhase&&phase&&pendingPhase.ordinal>phase.ordinal?pendingPhase:phase?.index===slot.index?phase:null;
+  const future=!!clocked&&clocked.start>position;
   const bpm=clocked?sceneTiming.bpm:director.tempo.locked?director.tempo.bpm:120;
   const localTime=clocked?clocked.localTime:Math.max(0,position-slot.start);
   const previous=clocked&&clocked.ordinal>0?catalog[clocked.previousIndex]?.scene:undefined;
-  const fadeSeconds=clocked?Math.min(clocked.duration/4,durationBeats?durationBeats*60/bpm:durationMs/1000):0;
+  const fadeSeconds=clocked?Math.min(clocked.duration,durationBeats?durationBeats*60/bpm:durationMs/1000):0;
+  const transitionSeed=clocked?(sceneTiming.seed^Math.imul(clocked.ordinal+1,0x9e3779b1)^parseInt(catalog[clocked.previousIndex]!.sha256.slice(0,8),16)^Math.imul(parseInt(catalog[clocked.index]!.sha256.slice(0,8),16),0x85ebca6b))>>>0:sceneTiming.seed;
   const audio=isNerv&&!playing?slot.lastAudio:slot.audio.consume();slot.lastAudio=audio;
   const request: AvsWorkerRequest = { type: 'render', generation: slot.generation, sequence: ++sequence, pcm: data, audio, width, height,
-    ...(isNerv?{nerv:{time:position,localTime,progress:clocked?.progress??((localTime*bpm/240)%8)/8,bpm,seed:sceneTiming.seed,
+    ...(isNerv?{nerv:{time:future?clocked!.start:position,localTime,progress:clocked?.progress??((localTime*bpm/240)%8)/8,bpm,seed:sceneTiming.seed,transitionMode,transitionSeed,
       ...(previous&&autoFade&&transitionMode!==15?{previousScene:previous,previousTime:keepOld?position:clocked!.start,previousLocalTime:clocked!.duration+(keepOld?localTime:0),blend:Math.min(1,localTime/fadeSeconds)}:{})}}:{}) };
   slot.renderRevision=clockRevision;slot.renderedPosition=position;
   slot.worker.postMessage(request, [data]);
@@ -125,7 +151,7 @@ function render(slot: Slot) {
 function fail(slot: Slot, reason: string) {
   if (slot.dead) return;
   failed.add(slot.index); retryAfter = performance.now() + 1000; dispose(slot);
-  if (slot === prepared) { prepared = null; loading = false; pendingIndex=null; presets.cancel(); }
+  if (slot === prepared) { prepared = null; loading = false; pendingIndex=null;pendingClock=false;pendingPhase=null; presets.cancel(); }
   if (slot === outgoing) { outgoing = null; transition = null; }
   if (slot === active) {
     active = outgoing; outgoing = null; transition = null;
@@ -137,9 +163,9 @@ function fail(slot: Slot, reason: string) {
 }
 function commit() {
   if (!prepared?.bitmap) return;
-  if(pendingClock&&clockPhase()?.index!==prepared.index){cancelPrepared();return;}
+  if(pendingClock){const phase=clockPhase();if(!phase||phase.ordinal!==pendingPhase?.ordinal||phase.index!==prepared.index)return;}
   const fade = autoPending ? autoFade : manualFade && playing;
-  dispose(outgoing); outgoing = active; active = prepared; prepared = null; loading = false; pendingIndex=null;pendingClock=false;
+  dispose(outgoing); outgoing = active; active = prepared; prepared = null; loading = false; pendingIndex=null;pendingClock=false;pendingPhase=null;
   presets.select(active.index); autoPending = false; director.rearm();
   transition = outgoing ? new AvsTransition(transitionMode) : null;
   transitionStart = position;
@@ -150,8 +176,8 @@ function commit() {
   dirty = true; announce(`Preset ready: ${catalog[active.index]!.name}`);
   bridge?.postMessage('ready');
 }
-async function prepare(index: number, automatic: boolean) {
-  cancelPrepared(); dispose(outgoing); outgoing = null; transition = null; const current = ticket; loading = true; pendingIndex=index;pendingClock=clockPhase()?.index===index; autoPending = automatic; dirty = true;
+async function prepare(index: number, automatic: boolean, clockTarget?:ScenePhase) {
+  cancelPrepared(); dispose(outgoing); outgoing = null; transition = null; const current = ticket; loading = true; pendingIndex=index;pendingPhase=clockTarget??null;pendingClock=!!clockTarget; autoPending = automatic; dirty = true;
   announce(`Loading preset: ${catalog[index]!.name}...`);
   try {
     const preset = catalog[index]!;
@@ -175,14 +201,14 @@ async function prepare(index: number, automatic: boolean) {
       if (message.type === 'frame') {
         if(slot.renderRevision!==clockRevision&&preset.kind==='nerv'){clearTimeout(slot.timeout);slot.busy=false;message.bitmap.close();render(slot);return;}
         clearTimeout(slot.timeout); slot.busy = false; slot.bitmap?.close(); slot.bitmap = message.bitmap; dirty = true;
-        if (slot === prepared && !autoPending) commit();
+        if (slot === prepared){if(pendingClock)syncSceneClock();else if(!autoPending)commit();}
       }
     };
     const request: AvsWorkerRequest = { type: 'load', generation: slot.generation, preset: bytes.buffer as ArrayBuffer, bitmaps, width: 640, height: 360, gpuLane: 'exact' };
     worker.postMessage(request, [request.preset]);
   } catch (error) {
     if (current !== ticket) return;
-    loading = false; pendingIndex=null; presets.cancel(); retryAfter = performance.now() + 1000; failed.add(index); announce(`Preset unavailable: ${String(error)}`);
+    loading = false; pendingIndex=null;pendingClock=false;pendingPhase=null; presets.cancel(); retryAfter = performance.now() + 1000; failed.add(index); announce(`Preset unavailable: ${String(error)}`);
     if (!active) bridge?.postMessage('error');
   }
 }
@@ -239,7 +265,9 @@ bridge?.addEventListener('message', event => {
   } else if(message.type==='setups-loaded'||message.type==='setups-saved') {management.receive(message.type,message.setups);
   } else if(message.type==='library-error') {if(message.operation==='rate')ratings.length=0;announce(`Library: ${message.message}`);management.receive(message.type,message.message,message.operation);
   } else if (message.type === 'next' || message.type === 'previous') {
-    const index = message.type === 'next' ? (setupOrder?candidate():presets.next()) : (setupOrder?stepSetup(setupOrder,presets.index,-1,false):presets.previous()); if(index!==null)manualSelection(index);
+    const phase=clockPhase(), queued=phase?sceneCues.find(c=>c.ordinal===phase.ordinal+1):undefined;
+    const clockIndex=phase&&catalog[phase.index]?.kind==='nerv'&&setupOrder?stepSetup(setupOrder.filter(i=>!failed.has(i)),queued?.index??phase.index,message.type==='next'?1:-1,message.type==='next'&&presets.shuffle):null;
+    const index = clockIndex??(message.type === 'next' ? (setupOrder?candidate():presets.next()) : (setupOrder?stepSetup(setupOrder,presets.index,-1,false):presets.previous())); if(index!==null)manualSelection(index);
   } else if (message.type === 'shuffle') {
     presets.shuffle = message.enabled === true; if (autoPending) cancelPrepared();
     clockRevision++;syncSceneClock();
@@ -263,7 +291,8 @@ function frame(now: number) {
   if (!flash.available) { status.textContent = 'Visualizer paused: flash protection unavailable'; document.body.classList.add('protection-error'); }
   const bars = director.remainingBars;
   const phase=clockPhase();
-  timing.textContent = phase?`Scene clock · ${sceneTiming.bpm} BPM · ${Math.ceil((phase.duration-phase.localTime)*sceneTiming.bpm/240)} bars · ${playing?'playing':'paused'}`:sceneTiming.enabled&&sequenceSuspended?'Scene clock held · activate setup or toggle Auto off/on to resume':!director.enabled ? 'Auto off' : !playing ? 'Auto paused' : !director.tempo.locked ? (director.energy < .001 ? 'Auto · waiting for audio signal' : 'Auto · listening for tempo') : `${Math.round(director.tempo.bpm)} BPM · ${bars === null ? 'waiting for music' : `${bars} bars`} ${prepared?.bitmap ? '· ready' : loading ? '· preparing' : ''}`;
+  const queued=phase?sceneCues.find(c=>c.ordinal===phase.ordinal+1):undefined;
+  timing.textContent = phase?`Scene clock · ${sceneTiming.bpm} BPM · ${Math.ceil((phase.duration-phase.localTime)*sceneTiming.bpm/240)} bars · ${playing?'playing':'paused'}${queued?` · queued ${catalog[queued.index]!.name}`:''}`:sceneTiming.enabled&&sequenceSuspended?'Scene clock held · activate setup or toggle Auto off/on to resume':!director.enabled ? 'Auto off' : !playing ? 'Auto paused' : !director.tempo.locked ? (director.energy < .001 ? 'Auto · waiting for audio signal' : 'Auto · listening for tempo') : `${Math.round(director.tempo.bpm)} BPM · ${bars === null ? 'waiting for music' : `${bars} bars`} ${prepared?.bitmap ? '· ready' : loading ? '· preparing' : ''}`;
   const fresh = playing && now - lastAudio < 500;
   const visible = hostVisible && !document.hidden;
   const scale = Math.min(devicePixelRatio || 1, 1920 / Math.max(1, canvas.clientWidth), 1080 / Math.max(1, canvas.clientHeight));
