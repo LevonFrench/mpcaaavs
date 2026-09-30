@@ -4,9 +4,12 @@ Stills of the demo show `pixel-stage` (`visualizer/src/shows/pixel-stage/`), dra
 art, no audio committed). The song map is the NERV reference fixture's (`visualizer/tools/fixtures/nerv-reference/`), planned by `planShow()` with
 the Pixel Stage show definition. Software rendering (headless Chromium, SwiftShader).
 
-Files here are small JPGs: `<plate>_<time>_1080p.jpg` is a 1920x1080 still downscaled to 960x540; `<plate>_<time>_4k_crop.jpg` is an unscaled
-1000x600 crop of the 3840x2160 still (every native pixel is a 10x10... see the scale in the plate's native size) to show the pixel edges.
-`duel_12.96_sharp.jpg` is the same frame in the optional `sharp` scale mode (sharp-bilinear fill instead of the integer scale).
+Files here are small JPGs. `<plate>_<time>_1080p.jpg` is a 1920x1080 still downscaled to 960x540 (the downscale blurs the pixel edges; the crops
+below are the sharpness evidence). `<plate>_<time>_4k_crop.jpg` is an unscaled 1000x600 crop of the 3840x2160 still: at 4K every native pixel of
+the plate is an exact block of whole output pixels (integer scale 9 for the 256x224 duel, 10 for the 384x216 and 320x200 plates, 12 for the
+320x180 plates), so the edges stay hard. `duel_12.96_sharp_1080p.jpg` is the duel frame rendered in the optional `sharp` scale mode (fractional
+fill with the sharp-bilinear shader) instead of the default integer scale with the themed border; it was produced by temporarily setting
+`scaleMode: 'sharp'` on the duel plate, which is not committed.
 
 Plates and what each shows (time in song seconds): `select` (intro) 4.63, `duel` (groove) 12.96 and 29.12, `march` (groove) 24.66 and 42.66,
 `gallery` (break) 48.32 and 102.32, `charge` (build) 60.66 and 135.75, `finale` (drop) 69.66 (the super: flash, shake, zoom), 78.82 and 147.06.
