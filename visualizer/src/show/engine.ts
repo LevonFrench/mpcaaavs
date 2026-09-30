@@ -243,7 +243,7 @@ export class Engine {
     this.loaded.clear();
     if (this.spectrum) disposeSpectrumTextures(this.spectrum);
     this.renderer.dispose();
-    this.renderer.forceContextLoss();
+    try { this.renderer.forceContextLoss(); } catch { /* WEBGL_lose_context is optional */ }
   }
 
   private frameFor(e: TimelineEntry, t: number, dt: number, seeked: boolean, preroll: boolean, under: THREE.Texture | null, tin: number, tout: number, au: AudioData = this.audio): Frame {

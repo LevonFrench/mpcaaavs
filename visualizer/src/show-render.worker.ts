@@ -274,7 +274,7 @@ async function presetMessage(m: AvsWorkerRequest) {
     if (pending?.ready && now === pending.scale) {
       // switch: the copy has loaded the preset; the old renderer goes
       active?.worker.terminate();
-      if (!active) { presetEngine?.dispose(); presetEngine = null; presetReady = false; presetKey = ''; }
+      if (!active) { try { presetEngine?.dispose(); } catch { /* the context is going away either way */ } presetEngine = null; presetReady = false; presetKey = ''; }
       active = pending; pending = null; scaleSwitch.settle(active.scale);
     }
   }
@@ -285,7 +285,10 @@ async function presetMessage(m: AvsWorkerRequest) {
 scope.onmessage = ({ data }) => {
   const type = (data as { type?: unknown } | null)?.type;
   if (type === 'load' || type === 'render' || type === 'clear' || type === 'controls') {
-    queue = queue.then(() => presetMessage(data as AvsWorkerRequest));
+    // one failing message must never reject the queue: every later message would be skipped and the host would wait forever
+    queue = queue.then(() => presetMessage(data as AvsWorkerRequest)).catch((error) => {
+      post({ type: 'error', generation: (data as { generation?: number }).generation ?? -1, message: String((error as Error)?.stack ?? error), fatal: true });
+    });
     return;
   }
   queue = queue.then(async () => {
