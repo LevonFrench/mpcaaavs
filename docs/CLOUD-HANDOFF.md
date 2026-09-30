@@ -23,8 +23,10 @@ Start here if you are a cloud session working on this repository. Read
 | Branch | State |
 | --- | --- |
 | `cloud/multiview-repairs` | Done. Ten Multiview defects fixed with regression checks; CPU suite and both builds pass. The `src/mpc-hc/AAAVSView.cpp` change is uncompiled (Windows only). Leave it alone. |
-| `cloud/nerv-show-engine` | Work in progress, stopped mid phase 1. Engine (`visualizer/src/show/`), all 16 plates (`visualizer/src/shows/nerv/`), OFL fonts (`visualizer/show-assets/fonts/`), reference fixture (`visualizer/tools/fixtures/nerv-reference/`) and a still renderer (`visualizer/tools/render-show-stills.mjs`) are ported but unverified: typecheck, rendering and host wiring have not been run. |
-| `cloud/song-map` | Work in progress. Shared contract `visualizer/src/song-map/types.ts` plus analyzer kernels, rhythm, sections and a synthetic fixture generator. Not wired into `npm run check`, not verified. |
+| `cloud/nerv-show-engine` | Done (task 1). The engine, the 16 plates, fonts and fixture typecheck and render. Upstream contact sheets for every plate, with pixel metrics, are in `.show-stills/nerv/`. `planShow()` reproduces upstream's timeline (`check-show-plan`). There is a live fallback (`check-show-live`), and NERV presets play on the engine in both hosts with a Canvas2D fallback (`check-show-preset`, `tools/smoke-show-preset.mjs`). Determinism is covered (`check-show-determinism`, `render-show-stills.mjs --determinism`). Native WebView2 playback is not yet verified. |
+| `cloud/song-map` | Done (task 2). Worker scan, `SongMapClock`, cache, Player scan on open and the MPC live feed pass `check-song-map` on synthetic fixtures. The native bridge additions are listed in `docs/SONG-MAP.md`. Nothing has been checked on real music. |
+| `cloud/show-asset-packs` | Done (task 3). Manifest, loader, path rules, procedural stand-ins and the packaging guard pass `check-asset-packs` and `check-release-package.py`. No host reads packs yet. |
+| `cloud/integration` | Task 4. `aaavs-integration` plus the four branches above, with conflicts resolved (the check chain, build entries, `package-release.py` and the `mpc-host.ts` imports). `npm run check`, both builds and `check-release-package.py` pass. |
 
 `visualizer/src/song-map/types.ts` is the shared contract between the engine
 and the analyzer. Both branches carry the identical file; change it only in a
