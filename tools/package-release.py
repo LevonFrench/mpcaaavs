@@ -38,6 +38,17 @@ def no_links(path):
     return path
 
 
+PRIVATE_ASSET_DIRECTORY = 'show-assets-private'
+
+
+def private_asset_check(names):
+    """Refuse any release path inside a private show-asset directory (git-ignored, local only)."""
+    for name in names:
+        parts = [part.rstrip('. ').lower() for part in re.split(r'[\\/]+', str(name))]
+        if PRIVATE_ASSET_DIRECTORY in parts:
+            raise ValueError(f'Private show assets must never be released: {name}')
+
+
 def digest(data):
     return hashlib.sha256(data).hexdigest()
 
@@ -69,6 +80,7 @@ def package(player, output, label):
         raise ValueError('Release output already exists; use a new label or output directory')
     inputs = [(player / relative, relative) for relative in RUNTIME_FILES]
     inputs += [(ROOT / relative, relative) for relative in DOCUMENTS]
+    private_asset_check(relative for _, relative in inputs)
     roots = (ROOT, os.environ.get('USERPROFILE'), os.environ.get('HOME'))
     # Validate all whitelisted inputs before creating an output directory.
     for source, relative in inputs:
@@ -96,6 +108,7 @@ def package(player, output, label):
     if lock.exists():
         lock.unlink()
     files = sorted(path for path in destination.rglob('*') if path.is_file())
+    private_asset_check(path.relative_to(destination).as_posix() for path in files)
     records = {}
     for file in files:
         no_links(file)
@@ -106,12 +119,14 @@ def package(player, output, label):
     (destination / 'SHA256SUMS').write_text(sums, encoding='utf-8', newline='\n')
     with zipfile.ZipFile(archive, 'x', compression=zipfile.ZIP_DEFLATED, compresslevel=9) as package_zip:
         for file in sorted(path for path in destination.rglob('*') if path.is_file()):
+            private_asset_check((file.relative_to(destination).as_posix(),))
             package_zip.write(file, f'{name}/{file.relative_to(destination).as_posix()}')
     # Extract only our just-created relative ZIP paths, then independently hash every file.
     with zipfile.ZipFile(archive) as package_zip:
         package_zip.extractall(extracted)
     extracted_root = extracted / name
     actual = {path.relative_to(extracted_root).as_posix() for path in extracted_root.rglob('*') if path.is_file()}
+    private_asset_check(actual)
     if actual != set(records) | {'SHA256SUMS'}:
         raise ValueError('Extracted release inventory differs')
     for relative, expected in records.items():
