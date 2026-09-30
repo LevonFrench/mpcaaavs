@@ -38,6 +38,8 @@ export interface ShowInitMessage {
   readonly sampleRate?: number;
   /** Plan the whole show with planShow() (default true when a song map is given). */
   readonly plan?: boolean;
+  /** Which show to plan and render: 'nerv' (default) or 'pixel-stage' (see src/shows/defs.ts). */
+  readonly show?: string;
   /** Restrict the plan to these plate ids (faster stills). */
   readonly only?: readonly string[];
   /** Log init progress to the console. */
@@ -128,6 +130,7 @@ export function validateShowRequest(m: unknown): ShowWorkerRequest {
     if (x.songMap === null && (!finite(x.duration) || (x.duration as number) <= 0 || (x.duration as number) > 6 * 3600 || !finite(x.bpm) || (x.bpm as number) < 20 || (x.bpm as number) > 400)) throw new Error('Invalid live show clock');
     if (x.firstBeat !== undefined && (!finite(x.firstBeat) || Math.abs(x.firstBeat as number) > 6 * 3600)) throw new Error('Invalid live show clock');
     if (x.sampleRate !== undefined && (!finite(x.sampleRate) || (x.sampleRate as number) < 8000 || (x.sampleRate as number) > 384000)) throw new Error('Invalid live show clock');
+    if (x.show !== undefined && (typeof x.show !== 'string' || !/^[a-z0-9-]{1,32}$/.test(x.show))) throw new Error('Invalid show id');
     if (x.plan !== undefined && typeof x.plan !== 'boolean') throw new Error('Invalid show plan flag');
     if (x.only !== undefined && (!Array.isArray(x.only) || x.only.some((s) => typeof s !== 'string'))) throw new Error('Invalid show plate filter');
     return m as ShowInitMessage;

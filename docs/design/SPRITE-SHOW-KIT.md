@@ -108,3 +108,24 @@ Packs follow the asset-pack manifest defined for `cloud/show-asset-packs`
 (`docs/CLOUD-HANDOFF.md`, task 3) with the roles above as its region types. The
 public build ships no pack; each plate that uses a role also defines its
 procedural stand-in.
+
+## Engine: sprite layer and choreographer (implemented)
+
+Status: implemented in `visualizer/src/show/sprite/`, demo show in `visualizer/src/shows/pixel-stage/`, CPU checks in
+`visualizer/tools/check-sprite-layer.mjs`, stills with `node tools/render-show-stills.mjs --show pixel-stage` (see `.show-stills/sprite/README.md`).
+
+| Module | What it does |
+| --- | --- |
+| `layer.ts` | Sprite layer. Uploads a pack's atlases (raw RGBA data or decoded bitmaps), draws instanced quads into a native-resolution target with `texelFetch` (nearest, no filtering or bleeding), facing by flip, per-instance tint, normal, additive and screen blending, palette swap through an index atlas plus a palette texture (one row per palette, rebuilt on the beat for cycles). No drop shadows. |
+| `scaling.ts`, `present.ts` | Pixel scaling policy. The plate renders at the game's native size (e.g. 256x224, 320x180, 384x216) and is presented at the largest **integer** scale, centred, with a themed border drawn on the same pixel grid; `sharp` mode fills the frame with a fractional scale and the sharp-bilinear shader. 1080p and 4K differ only by the integer factor. |
+| `clip.ts` | Retiming rules: loops last whole beats and read the beat grid (so seeks and tempo changes keep them locked); one-shots keep native tick timing and only their start moves; hitstop 4-12 ticks from onset strength freezes a one-shot at its big frame. |
+| `motion.ts` | The 13 motion models as pure functions of the beat (flights arrive on a whole beat; orbit and pendulum have a period of one bar, hover of one beat). |
+| `choreo.ts` | The choreographer: song-map events to a script, with look-ahead so every clip's big frame starts on its event; call and response by phrase; projectiles launched on the big frame, landing on a beat; enemies that die on a snare respawn on the next downbeat; banners and screen punches at section starts; the drop moment (punch on the drop downbeat, super one bar later with a screen freeze). With no onsets in the map it performs on the beat grid. |
+| `perform.ts` | `Stage`: evaluates a script at any time into sprite draws and post punches (shake and zoom in whole native pixels through `PostOverrides`, flash). Stateless. |
+| `hud.ts` | HUD as meters: ghost-drain bars, segmented meters with MAX flash, counters and timers from pack font grids, nine-slice boxes, banners. |
+| `test-pack.ts` | The procedural test pack (neutral shapes; indexed figures with palette swaps, trimmed frames, detached blades, effects, backdrops, UI and fonts) built in code through the real manifest validator. |
+| `scene.ts` | `makeSpritePlate(spec)`: a `PlateSpec` (native size, border, backdrop, cast and lanes, HUD) becomes an engine `Scene`. |
+
+A show picks the sprite layer by using `makeSpritePlate`; `show-init` has a `show` field (`nerv` by default, `pixel-stage`) and the worker looks
+plates up in `src/shows/scenes.ts`. Real packs replace the test pack by passing their `AssetPack` where `sharedTestPack()` is used in `scene.ts`;
+plates name regions and verbs, never files.

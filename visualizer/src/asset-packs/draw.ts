@@ -106,7 +106,7 @@ function drawRegion(ctx: SpriteContext, pack: AssetPack, region: Region, slot: S
     const frameImage = pack.image(frame.atlas);
     if (!frameImage) return false;
     const [fx, fy, fw, fh] = frame.rect;
-    ctx.drawImage(frameImage as unknown as CanvasImageSource, fx, fy, fw, fh, -frame.anchor[0], -frame.anchor[1], fw, fh);
+    ctx.drawImage(frameImage as unknown as CanvasImageSource, fx, fy, fw, fh, frame.trim[0] - frame.anchor[0], frame.trim[1] - frame.anchor[1], fw, fh);
     return true;
   }
   const [rx, ry, rw, rh] = region.rect;

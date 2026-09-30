@@ -4,7 +4,11 @@ import type { ActorRegion, AssetPackManifest, AssetRole, AtlasDef, ClipDef, Clip
 /** Anything `drawImage` accepts that also reports its size (ImageBitmap, HTMLCanvasElement, OffscreenCanvas). */
 export interface AtlasImage { readonly width: number; readonly height: number }
 
-export interface ResolvedFrame { readonly atlas: string; readonly rect: Rect; readonly anchor: Point; readonly hold: number }
+/** A detached part resolved for one frame: its atlas rectangle and its top-left relative to the frame's anchor (unflipped). */
+export interface ResolvedPart { readonly name: string; readonly atlas: string; readonly rect: Rect; readonly offset: readonly [number, number]; readonly layer: 'front' | 'back'; readonly palette?: string }
+/** `anchor` is as the manifest gives it: inside the rectangle, or (when the clip has trims) inside the untrimmed frame, in which case the
+ * anchor inside the rectangle is `anchor - trim`. `trim` is [0, 0] without trims. */
+export interface ResolvedFrame { readonly atlas: string; readonly rect: Rect; readonly anchor: Point; readonly hold: number; readonly trim: Point; readonly parts: readonly ResolvedPart[] }
 
 /** Frame shown `sourceFrame` source frames after a clip starts. Loops wrap, one-shots hold their last frame; negative times show frame 0. */
 export function clipFrameIndex(hold: readonly number[], loop: boolean, sourceFrame: number): number {
@@ -17,6 +21,8 @@ export function clipFrameIndex(hold: readonly number[], loop: boolean, sourceFra
   return hold.length - 1;
 }
 export const clipDuration = (hold: readonly number[]): number => hold.reduce((sum, h) => sum + h, 0);
+
+const ZERO_POINT: Point = Object.freeze([0, 0]) as Point;
 
 export class AssetPack {
   readonly id: string;
@@ -72,7 +78,14 @@ export class AssetPack {
         rect = strip.axis === 'x' ? [strip.rect[0] + i * cell, strip.rect[1], cell, strip.rect[3]] : [strip.rect[0], strip.rect[1] + i * cell, strip.rect[2], cell];
         anchor = [rect[2] >> 1, rect[3]];
       }
-      out.push(Object.freeze({ atlas, rect: Object.freeze(rect) as Rect, anchor: clip.anchors ? clip.anchors[i]! : anchor, hold: clip.hold[i]! }));
+      const parts: ResolvedPart[] = [];
+      if (clip.parts) {
+        for (const name of Object.keys(clip.parts).sort()) {
+          const part = clip.parts[name]!, r = part.rects[i];
+          if (r) parts.push(Object.freeze({ name, atlas: part.atlas, rect: r, offset: part.offsets[i]!, layer: part.layer, ...(part.palette === undefined ? {} : { palette: part.palette }) }));
+        }
+      }
+      out.push(Object.freeze({ atlas, rect: Object.freeze(rect) as Rect, anchor: clip.anchors ? clip.anchors[i]! : anchor, hold: clip.hold[i]!, trim: clip.trims ? clip.trims[i]! : ZERO_POINT, parts: Object.freeze(parts) }));
     }
     const frozen = Object.freeze(out);
     this.frames.set(id, frozen);
