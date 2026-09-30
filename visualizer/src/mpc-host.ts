@@ -122,7 +122,9 @@ function setMinimumRating(value:number){
 function manualSelection(index:number,filtered=false){
   if(multiView.selectPreset(index))return;
   const phase=clockPhase();
-  if(phase&&isSceneKind(catalog[phase.index])&&isSceneKind(catalog[index])&&selectionPool().includes(index)){
+  // Queue on the scene clock only when the owner chose a quantized manual queue; the default (0) is immediate, as the
+  // Manual queue control promises. An immediate pick suspends the clock sequence and Auto continues from the new preset.
+  if(queueQuantize>0&&phase&&isSceneKind(catalog[phase.index])&&isSceneKind(catalog[index])&&selectionPool().includes(index)){
     if(failed.has(index)){announce('This scene could not be loaded; choose another preset.');return;}
     try{sceneCues=scheduleSceneCue(sceneCues,phase,index);}catch(error){announce(String(error));return;}
     clockRevision++;syncSceneClock();
