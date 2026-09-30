@@ -6,7 +6,7 @@ import type { AudioData } from './audio.ts';
 import { Lyrics } from './lyrics.ts';
 import type { BarMap } from './bar-map.ts';
 import { Compositor, FSPass, Layer2D, W, H, PW, PH, SCALE, SS_TAP, makeRT, clearRT, setLayerOwner } from './gl.ts';
-import { PERF, perfBegin, perfEnd, perfSetContext } from './perf.ts';
+import { PERF, perfBegin, perfEnd, perfSetContext } from '../perf-worker.ts';
 import { DEFAULT_POST, Post, SHOULDER_GLSL, type PostParams } from './post.ts';
 import { Hud, type Caption } from './hud.ts';
 import type { Frame, Scene, SceneClass, SceneCtx, PostOverrides } from './scene.ts';

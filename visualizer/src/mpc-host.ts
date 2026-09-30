@@ -17,6 +17,7 @@ import { parseSettings, setupIndices, stepSetup, fadeSpecOf, configureSettings, 
 import { localAssetUrl } from './avs/local-assets.ts';
 import { defaultSceneTiming, parseSceneTiming, compileSceneClock, scheduleSceneCue, type ClockFrame, type SceneClock, type SceneTiming, type ScenePhase, type SessionSceneCue } from './mpc-scene-clock.ts';
 import { FpsMeter } from './fps-meter.ts';
+import { PerfRecorder, epochNow, parsePerfMode, validateWorkerPerf } from './perf-trace.ts';
 import { FpsLabel, timingLabel } from './timing-label.ts';
 import { boundaryLevel, defaultFadeSpec, parseFadeFields, pickFade, planFade, type FadeSpec } from './mpc-transition-timing.ts';
 import { NERV_SCENES } from './nerv-scenes.ts';
@@ -74,6 +75,37 @@ let fadeSpec: FadeSpec = defaultFadeSpec, queueQuantize = 0;
 // Frame-rate channels: present (headline), display, render and clock. Timestamps are rAF time or performance.now(), one time base per meter.
 const fps = { present: new FpsMeter(), display: new FpsMeter(), render: new FpsMeter(), clock: new FpsMeter() }, fpsLabel = new FpsLabel();
 let timingText = '';
+// Stage timing (src/perf-trace.ts, docs/PERFORMANCE.md): OFF unless ?perf=1|sync, localStorage mpcaaavs.perf, Ctrl+Alt+P or window.__aaavsPerf.enable().
+// Every site below tests `perf.enabled` (one boolean) before it measures anything.
+const perf = new PerfRecorder(() => performance.now());
+let perfLineText: string | null = null, perfLineAt = -Infinity, lastRaf = 0;
+function perfSet(mode: 0 | 1 | 2) {
+  if (mode) perf.enable(mode); else perf.disable();
+  perfLineText = null; perfLineAt = -Infinity; lastRaf = 0;
+  try { if (mode) document.body.classList.add('timing-always'); else if (sizer.prefs.timingOverlay !== 1) document.body.classList.remove('timing-always'); } catch { /* minimal DOM */ }
+}
+/** The `perf` field of a render request: the mode, and the host's epoch time where the platform has one (the worker then reports the request's time in flight). */
+function perfRequest() { const sent = epochNow(); return Number.isFinite(sent) ? { mode: perf.level, sent } : { mode: perf.level }; }
+function perfTraceDownload() {
+  try {
+    const blob = new Blob([JSON.stringify(perf.trace(true, { page: 'mpc-host', ua: navigator.userAgent, dpr: devicePixelRatio || 1 }))], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = `aaavs-perf-${Date.now()}.json`;
+    document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  } catch (error) { announce(`Perf trace download failed: ${String(error)}`); }
+}
+{
+  (window as unknown as { __aaavsPerf?: unknown }).__aaavsPerf = {
+    enable: (mode: number | string = 1) => perfSet(parsePerfMode(mode) || 1), disable: () => perfSet(0), reset: () => perf.reset(),
+    trace: (withSeries = true) => perf.trace(withSeries, { page: 'mpc-host' }), download: perfTraceDownload, get mode() { return perf.level; },
+  };
+  try {
+    const query = (window as { location?: { search?: string } }).location?.search;
+    const fromUrl = query ? parsePerfMode(new URLSearchParams(query).get('perf')) : 0;
+    const mode = fromUrl || parsePerfMode(globalThis.localStorage?.getItem('mpcaaavs.perf'));
+    if (mode) perfSet(mode);
+  } catch { /* storage unavailable: stays off */ }
+}
 // Live Random picks: per-activation counter plus a session seed created once (tests replace Math.random before the host loads).
 let liveFadeCount = 0;
 const liveFadeSeed = Math.floor(Math.random() * 4294967296) >>> 0;
@@ -255,7 +287,9 @@ const multiView=new MultiViewSession({catalog:()=>catalog,presets:fetchLocalAvsP
   announce,failed:index=>{failed.add(index);failureRevision++;},failures:()=>failed,now:()=>performance.now(),
   present:(surface,now)=>{if(canvas.width!==surface.width||canvas.height!==surface.height){canvas.width=surface.width;canvas.height=surface.height;flash.reset();}
     if(canvas.style)canvas.style.imageRendering='auto';
+    const presentFrom=perf.enabled?performance.now():0;
     flash.present(context,surface,now/1000,()=>{context.imageSmoothingEnabled=true;context.drawImage(surface,0,0,canvas.width,canvas.height);});
+    if(perf.enabled)perf.record('host.present',performance.now()-presentFrom);
     label.textContent=multiView.summary;fps.present.mark(now);
     if(!flash.available){status.textContent='Visualizer paused: flash protection unavailable';document.body.classList.add('protection-error');}
     else document.body.classList.remove('protection-error');}});
@@ -320,6 +354,7 @@ function render(slot: Slot) {
   slot.busy=true;const data=pcm.slice().buffer;
   const audio=isSceneKind(catalog[slot.index])&&!playing?slot.lastAudio:slot.audio.consume();slot.lastAudio=audio;
   const request: AvsWorkerRequest = { type: 'render', generation: slot.generation, sequence: ++sequence, pcm: data, audio, width, height,
+    ...(isNerv&&perf.enabled?{perf:perfRequest()}:{}),
     ...(isNerv?{nerv:{time:at,localTime,progress:clocked?.progress??((localTime*bpm/240)%8)/8,bpm,seed:sceneTiming.seed,transitionMode,transitionSeed,
       ...(clocked&&sceneClock?{grid:sceneClock.clockGrid,sceneStart:clocked.start,sceneEnd:clocked.end}:{}),
       ...(previous&&autoFade&&transitionMode!==TRANSITION_CUT&&fade&&fade.seconds>0?{previousScene:previous,previousTime:keepOld?at:clocked!.start,previousLocalTime:keepOld?at-clocked!.previousStart:clocked!.previousFrozen,
@@ -333,6 +368,7 @@ function render(slot: Slot) {
         previousTime:keepOld?at:clocked!.start,previousLocalTime:keepOld?at-clocked!.previousStart:clocked!.previousFrozen,previousSceneStart:clocked!.previousStart,previousSceneEnd:clocked!.start,
         blend:Math.min(1,fade!.progress),fadeSeconds:fade!.seconds,transitionBeats:fadeBeats,transitionBoundary:boundary,transitionAccent:1,transitionReduced:reducedMotion}:{})})}:{}) };
   slot.renderRevision=clockRevision;slot.renderedPosition=position;slot.sentAt=performance.now();slot.sized=`${width}x${height}`;
+  if (perf.enabled) { perf.add('host.render.messages'); perf.add('host.render.bytes', data.byteLength + 4 * 576 + 256 + (isHud ? 64 * 4 : 0)); }
   slot.worker.postMessage(request, [data]);
   slot.timeout = window.setTimeout(() => fail(slot, 'Preset render timed out'), 5000);
 }
@@ -413,6 +449,13 @@ async function prepare(index: number, automatic: boolean, clockTarget?:ScenePhas
       if (message.type === 'frame') {
         if(slot.renderRevision!==clockRevision&&isSceneKind(preset)){clearTimeout(slot.timeout);slot.busy=false;message.bitmap.close();render(slot);return;}
         clearTimeout(slot.timeout); slot.busy = false; slot.bitmap?.close(); slot.bitmap = message.bitmap; dirty = true;
+        if (perf.enabled) {
+          perf.add('host.frame.messages');
+          if (slot === active && slot.sentAt > 0) {
+            perf.record('host.rtt', performance.now() - slot.sentAt);
+            try { if (message.perf) perf.recordWorker(validateWorkerPerf(message.perf), epochNow()); else perf.record('frame.total', message.renderMs); } catch { /* a malformed report is dropped */ }
+          }
+        }
         if (slot === active) fps.render.mark(performance.now());
         if (slot === active && playing && slot.sentAt > 0 && sizer.recordFrame(kindOf(slot.index), performance.now() - slot.sentAt)) announce(`Render quality: ${describeResolved(resolveSlot(slot.index))}`);
         if (slot === prepared){if(pendingClock)syncSceneClock();else if(!autoPending)commit();}
@@ -436,6 +479,8 @@ bridge?.addEventListener('message', event => {
   const message = event.data;
   if (!message || typeof message !== 'object') return;
   if (message.type === 'audio') {
+    const audioStart = perf.enabled ? performance.now() : 0;
+    if (perf.enabled) { const n = Array.isArray(message.frames) ? message.frames.length : 0; perf.add('host.audio.messages'); perf.add('host.audio.frames', n); perf.add('host.audio.floats', (n + (Array.isArray(message.pcm) ? 1 : 0)) * 1152); }
     if(message.epoch!==epoch)trackDuration=null;
     if(message.duration!==undefined)trackDuration=typeof message.duration==='number'&&Number.isFinite(message.duration)&&message.duration>0&&message.duration<=AUDIO_DURATION_MAX?message.duration:null;
     playing = message.playing === true;management.notePlaying?.(playing);
@@ -465,6 +510,7 @@ bridge?.addEventListener('message', event => {
       if (!sceneTiming.enabled&&!management.open && autoPending && action.switch && prepared?.bitmap) commit();
       syncSceneClock();
     }
+    if (perf.enabled) perf.record('host.audio.msg', performance.now() - audioStart);
     bridge.postMessage('ack');
   } else if(message.type==='track') {
     // Native track identity (docs/SONG-MAP.md): a 64-hex content id names the cache entry; without it the live map is not persisted.
@@ -532,6 +578,20 @@ bridge?.addEventListener('message', event => {
   }
 });
 function frame(now: number) {
+  if (!perf.enabled) { frameBody(now); return; }
+  if (lastRaf > 0) perf.record('host.raf.interval', now - lastRaf);
+  lastRaf = now;
+  const busyFrom = performance.now();
+  frameBody(now);
+  perf.record('host.raf.busy', performance.now() - busyFrom);
+}
+/** The perf segment of the timing line, recomputed twice a second. */
+function perfSegment(now: number): string | null {
+  if (!perf.enabled) return null;
+  if (now - perfLineAt >= 500) { perfLineAt = now; perfLineText = perf.line(); }
+  return perfLineText;
+}
+function frameBody(now: number) {
   if (closed) return;
   fps.display.mark(now);
   if (!flash.available) { status.textContent = 'Visualizer paused: flash protection unavailable'; document.body.classList.add('protection-error'); }
@@ -539,7 +599,8 @@ function frame(now: number) {
     const fpsText=fpsLabel.segment(now,{present:fps.present.read(now),display:fps.display.read(now),render:fps.render.read(now),clock:fps.clock.read(now)},sizer.prefs.showFps,playing&&hostVisible&&!document.hidden);
     // Composite submission FPS and pane frame age are separate channels: a smooth composite can still show stale pane frames.
     const age=multiView.frameAge,ageText=sizer.prefs.showFps&&playing&&age!==null?` · panes ${Math.round(age)} ms old`:'';
-    const line=`Multiview · ${multiView.bpm.toFixed(1)} BPM${fpsText?` · ${fpsText}`:''}${ageText}`;
+    const perfText=perfSegment(now);
+    const line=`Multiview · ${multiView.bpm.toFixed(1)} BPM${fpsText?` · ${fpsText}`:''}${ageText}${perfText?` · ${perfText}`:''}`;
     if(timing.textContent!==line)timing.textContent=line;
     requestAnimationFrame(frame);return;
   }
@@ -553,7 +614,8 @@ function frame(now: number) {
   const line = timingLabel({ autoEnabled: director.enabled, eligibleCount, clock: !!phase, sceneBpm: phase ? phase.bpm : sceneTiming.bpm, clockBarsLeft: phase ? phase.barsRemaining : 0,
     playing, queuedName: queued ? catalog[queued.index]!.name : null, clockEnabled: sceneTiming.enabled, sequenceSuspended, tempoLocked: director.tempo.locked, energy: director.energy,
     tempoBpm: director.tempo.bpm, remainingBars: bars, ready: !!prepared?.bitmap, loading, fps: fpsText, ...(sizer.prefs.showFps === 2 ? { resolution: describeResolved(r) } : {}), barBeat: phase && sceneClock ? sceneClock.barBeat(position) : null });
-  if (line !== timingText) timing.textContent = timingText = line;
+  const perfText = perfSegment(now), shown = perfText ? `${line} · ${perfText}` : line;
+  if (shown !== timingText) timing.textContent = timingText = shown;
   const resized = canvas.width !== r.canvas.width || canvas.height !== r.canvas.height || presentedKey !== r.key;
   if (visible && active?.bitmap && (dirty || resized || (transition && position !== lastPresentedPosition))) {
     // No transition: sample the worker bitmap directly. A transition composites into a surface sized by the larger plate.
@@ -562,12 +624,16 @@ function frame(now: number) {
       const surface = transitionSurface({ render: { width: outgoing.bitmap.width, height: outgoing.bitmap.height }, kind: kindOf(outgoing.index) }, { render: { width: sw, height: sh }, kind: kindOf(active.index) }).size;
       if (composite.width !== surface.width || composite.height !== surface.height) { composite.width = surface.width; composite.height = surface.height; }
       const t = Math.max(0, (position - transitionStart) / transitionDuration);
+      const transitionFrom = perf.enabled ? performance.now() : 0;
       transition.draw(cc, outgoing.bitmap, active.bitmap, t, surface.width, surface.height, envNow());
+      if (perf.enabled) perf.record('host.transition', performance.now() - transitionFrom);
       if (t >= 1) { dispose(outgoing); outgoing = null; transition = null; }
       source = composite; sw = surface.width; sh = surface.height;
     }
     if (sizeCanvas(canvas, r)) flash.reset();
+    const presentFrom = perf.enabled ? performance.now() : 0;
     flash.present(context, source, now / 1000, () => presenter.draw(context, source, { width: sw, height: sh }, r));
+    if (perf.enabled) perf.record('host.present', performance.now() - presentFrom);
     dirty = false; lastPresentedPosition = position; presentedKey = r.key; fps.present.mark(now);
     if (!flash.available) { status.textContent = 'Visualizer paused: flash protection unavailable'; document.body.classList.add('protection-error'); }
     else document.body.classList.remove('protection-error');
@@ -580,6 +646,10 @@ function frame(now: number) {
 }
 document.addEventListener('dblclick', () => {if(!management.open&&!multiView.controlsOpen)bridge?.postMessage('fullscreen');});
 document.addEventListener('keydown', event => {
+  // Stage timing toggle: Ctrl+Alt+P cycles off -> CPU timestamps -> GL-synchronised (distorts pipelining) -> off; Ctrl+Alt+Shift+P downloads the trace.
+  if(event.ctrlKey&&event.altKey&&event.code==='KeyP'){event.preventDefault();if(event.repeat)return;
+    if(event.shiftKey){perfTraceDownload();return;}
+    const next=(perf.level===0?1:perf.level===1?2:0) as 0|1|2;perfSet(next);announce(next===0?'Stage timing off':next===1?'Stage timing on (CPU timestamps)':'Stage timing on (GL-synchronised: distorts pipelining)');return;}
   if(event.ctrlKey&&!event.altKey&&!event.shiftKey&&event.code==='F9'){event.preventDefault();if(!event.repeat)multiView.showControls();return;}
   if(multiView.controlsOpen)return;
   if(event.ctrlKey&&!event.altKey&&!event.shiftKey){const command=({F6:'show-manager',F7:'show-setups',F8:'play-folder'} as Record<string,string>)[event.code];if(command){event.preventDefault();if(!event.repeat)bridge?.postMessage(command);return;}}

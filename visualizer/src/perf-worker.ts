@@ -8,7 +8,7 @@
 // gl.finish (Chromium flushes it when the canvas is uploaded as a texture: see gl.upload.canvas).
 //
 // Stage times of one frame are summed into an accumulator and handed out by perfTake() for the frame reply (`perf` field).
-import { epochNow, type PerfMode, type WorkerPerfFrame } from '../perf-trace.ts';
+import { epochNow, type PerfMode, type WorkerPerfFrame } from './perf-trace.ts';
 
 /** `frame` counts the reports handed out, so a half-measured span of an earlier frame is never completed in a later one. */
 export const PERF: { on: boolean; sync: boolean; gl: WebGL2RenderingContext | null; frame: number } = { on: false, sync: false, gl: null, frame: 0 };
@@ -16,13 +16,16 @@ export const PERF: { on: boolean; sync: boolean; gl: WebGL2RenderingContext | nu
 let acc: Record<string, number> = {};
 let cnt: Record<string, number> = {};
 
+/** The clock of the profiler: the only place the show engine's instrumentation reads time (tools/check-show-determinism.mjs keeps src/show free of performance.now). */
+export const perfNow = (): number => performance.now();
+
 export function perfBegin(): number {
   if (PERF.sync && PERF.gl) PERF.gl.finish();
-  return performance.now();
+  return perfNow();
 }
 export function perfEnd(stage: string, t0: number): number {
   if (PERF.sync && PERF.gl) PERF.gl.finish();
-  const d = performance.now() - t0;
+  const d = perfNow() - t0;
   acc[stage] = (acc[stage] ?? 0) + d;
   cnt[stage] = (cnt[stage] ?? 0) + 1;
   return d;
@@ -52,9 +55,9 @@ function hook(gl: WebGL2RenderingContext) {
     const orig = proto[name]!;
     (gl as unknown as Record<string, unknown>)[name] = function (this: WebGL2RenderingContext, ...args: unknown[]) {
       if (!PERF.on) return orig.apply(this, args);
-      const t0 = performance.now();
+      const t0 = perfNow();
       const r = orig.apply(this, args);
-      const d = performance.now() - t0;
+      const d = perfNow() - t0;
       if (name === 'bufferData' || name === 'bufferSubData') perfAdd('gl.upload.buffer', d);
       else {
         const src = args[args.length - 1];

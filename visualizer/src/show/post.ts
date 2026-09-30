@@ -3,7 +3,7 @@
 // film grain, vignette, fades/flash. Operates on the composited HDR (linear) frame.
 import * as THREE from 'three';
 import { FSPass, makeRT, W, H, SCALE } from './gl.ts';
-import { PERF, perfBegin, perfEnd } from './perf.ts';
+import { PERF, perfBegin, perfEnd } from '../perf-worker.ts';
 
 /** The tone shoulder (linear HDR -> 0..1 linear), shared with the engine's sampling error estimate. */
 export const SHOULDER_GLSL = /* glsl */ `

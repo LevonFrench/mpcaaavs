@@ -12,6 +12,8 @@
 //   --determinism      seek-replay proof: each time is rendered cold, then after rendering other times (a seek away and
 //                      back), and the two frames are compared pixel by pixel (reported per time; SwiftShader's own
 //                      run-to-run noise is measured by rendering the same time twice in a row)
+//   --perf-identity    instrumentation proof (src/perf-worker.ts): each time is rendered plain, plain again (SwiftShader's own noise), with stage timing
+//                      on (mode 1) and with GL-synchronised stage timing (mode 2), and the frames are compared pixel by pixel
 //   --live             no song map: the live fallback (tempo grid from the fixture's tempo and first beat) fed with AVS
 //                      frames made from the synthesized waveform at 60 fps up to each still time (use with --t)
 import { build } from 'esbuild';
@@ -91,12 +93,13 @@ window.__show = {
     return n;
   },
   // pixels of a render kept in the page, for the determinism comparison
-  async grab(t, key) {
+  async grab(t, key, perf) {
     const s = ++seq;
-    const f = await new Promise((res, rej) => { pending.set(s, { res, rej }); worker.postMessage({ type: 'show-render', generation: gen, sequence: s, time: t, sync: true }); });
+    const f = await new Promise((res, rej) => { pending.set(s, { res, rej }); worker.postMessage({ type: 'show-render', generation: gen, sequence: s, time: t, sync: true, ...(perf ? { perf: { mode: perf } } : {}) }); });
     const cv = new OffscreenCanvas(f.width, f.height), g = cv.getContext('2d');
     g.drawImage(f.bitmap, 0, 0); f.bitmap.close();
     (window.__grabs ??= {})[key] = g.getImageData(0, 0, f.width, f.height).data;
+    window.__lastPerf = f.perf ? Object.keys(f.perf.stages).length : 0;
     return f.plate;
   },
   compare(a, b) {
@@ -202,6 +205,23 @@ try {
       console.log(`determinism ${String(plate).padEnd(10)} t=${t.toFixed(2).padStart(7)}  same-time rerender: max ${noise.max} (${noise.off.toFixed(3)}% px)  after seeks: max ${replay.max} (${replay.off.toFixed(3)}% px)`);
     }
     writeFileSync(join(OUT, 'determinism.json'), JSON.stringify(rows, null, 1));
+  }
+  if (flag('perf-identity')) {
+    const rows = [];
+    for (const t of times) {
+      const plate = await page.evaluate(([t]) => window.__show.grab(t, 'a'), [t]);
+      await page.evaluate(([t]) => window.__show.grab(t, 'b'), [t]);
+      await page.evaluate(([t]) => window.__show.grab(t, 'c', 1), [t]);
+      const stages1 = await page.evaluate(() => window.__lastPerf);
+      await page.evaluate(([t]) => window.__show.grab(t, 'd', 2), [t]);
+      const stages2 = await page.evaluate(() => window.__lastPerf);
+      const noise = await page.evaluate(() => window.__show.compare('a', 'b')), cpu = await page.evaluate(() => window.__show.compare('a', 'c')), sync = await page.evaluate(() => window.__show.compare('a', 'd'));
+      rows.push({ t, plate, noise, cpu, sync, stages: [stages1, stages2] });
+      console.log(`perf-identity ${String(plate).padEnd(10)} t=${t.toFixed(2).padStart(7)}  plain rerender: max ${noise.max} (${noise.off.toFixed(3)}% px)  stage timing on: max ${cpu.max} (${cpu.off.toFixed(3)}% px, ${stages1} stages)  synchronised: max ${sync.max} (${sync.off.toFixed(3)}% px, ${stages2} stages)`);
+    }
+    writeFileSync(join(OUT, 'perf-identity.json'), JSON.stringify(rows, null, 1));
+    const worst = Math.max(...rows.map((r) => Math.max(r.cpu.max, r.sync.max))), noiseMax = Math.max(...rows.map((r) => r.noise.max));
+    console.log(`perf-identity: worst difference with instrumentation on = ${worst} levels; plain-rerender noise floor = ${noiseMax} levels; ${rows.every((r) => r.stages[0] > 0 && r.stages[1] > 0) ? 'every instrumented frame reported stages' : 'SOME INSTRUMENTED FRAMES REPORTED NO STAGES'}`);
   }
   if (flag('timing')) {
     // warm frames then 6 timed frames per plate at spread times (GPU-synchronised)

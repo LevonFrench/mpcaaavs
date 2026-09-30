@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { GLSL_COMMON } from './glsl/common.ts';
 import { SCALE } from './scale.ts';
 import { createCanvas } from './canvas.ts';
-import { PERF, perfAdd, perfBegin, perfEnd, perfRegisterLayer } from './perf.ts';
+import { PERF, perfAdd, perfBegin, perfEnd, perfNow, perfRegisterLayer } from '../perf-worker.ts';
 
 export { SCALE };
 /** Logical canvas: scenes lay out in these px at every output scale. */
@@ -215,7 +215,7 @@ export class Layer2D {
     perfRegisterLayer(this.canvas, this);
   }
   clear(color?: string) {
-    if (PERF.on && (this.drawStart < 0 || this.drawFrame !== PERF.frame)) { this.drawStart = performance.now(); this.drawFrame = PERF.frame; }
+    if (PERF.on && (this.drawStart < 0 || this.drawFrame !== PERF.frame)) { this.drawStart = perfNow(); this.drawFrame = PERF.frame; }
     const c = this.ctx;
     c.setTransform(1, 0, 0, 1, 0, 0);
     c.globalAlpha = 1;
@@ -228,7 +228,7 @@ export class Layer2D {
   upload() {
     if (PERF.on && this.drawStart >= 0 && this.drawFrame === PERF.frame) {
       // the draw span: first clear() of this frame to this call (Canvas2D command recording; the raster is flushed by the texture upload)
-      const d = performance.now() - this.drawStart;
+      const d = perfNow() - this.drawStart;
       perfAdd(`layer.${this.id}.draw`, d); perfAdd('canvas2d.draw', d);
     }
     this.drawStart = -1;

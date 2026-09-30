@@ -47,6 +47,7 @@ export const PERF_STAGES: readonly StageDef[] = [
   { name: 'msg.request', where: 'worker', desc: 'Time the render request spent between the host postMessage and the worker starting it (flight plus queueing behind earlier work); needs the host to send its epoch.' },
   { name: 'host.rtt', where: 'host', desc: 'Request to frame reply of the active slot, measured on the main thread.' },
   { name: 'host.reply', where: 'host', desc: 'Time the frame reply spent between the worker postMessage and the host handler starting (flight plus main-thread queueing).' },
+  { name: 'host.complete', where: 'host', desc: 'Bench only: time from the reply to the frame\'s pixels existing (a 1-pixel readback of the presented canvas): GPU work the worker had queued but not finished.' },
   { name: 'host.present', where: 'host', desc: 'Main-thread draw of a presented frame: flash gate and canvas copy/scale.' },
   { name: 'host.transition', where: 'host', desc: 'Main-thread AVS transition composite between two worker bitmaps.' },
   { name: 'host.raf.interval', where: 'host', desc: 'Interval between requestAnimationFrame callbacks (display cadence; jitter is its spread).' },
@@ -71,7 +72,7 @@ export const isKnownStage = (name: string) => STAGE_NAMES.has(name) || LAYER_STA
 export const isKnownCounter = (name: string) => COUNTER_NAMES.has(name);
 
 // ------------------------------------------------------------------ statistics
-export interface StageSummary { readonly n: number; readonly mean: number; readonly p50: number; readonly p95: number; readonly p99: number; readonly max: number; readonly sum: number }
+export interface StageSummary { readonly n: number; readonly mean: number; readonly p50: number; readonly p95: number; readonly p99: number; readonly max: number }
 
 /** Nearest-rank percentile of an ascending array (0 <= q <= 1). */
 export function percentile(sorted: ArrayLike<number>, q: number): number {
@@ -81,11 +82,11 @@ export function percentile(sorted: ArrayLike<number>, q: number): number {
 }
 export function summarize(values: ArrayLike<number>): StageSummary {
   const n = values.length;
-  if (!n) return { n: 0, mean: 0, p50: 0, p95: 0, p99: 0, max: 0, sum: 0 };
+  if (!n) return { n: 0, mean: 0, p50: 0, p95: 0, p99: 0, max: 0 };
   const a = Float64Array.from(values as ArrayLike<number>).sort();
   let sum = 0;
   for (let i = 0; i < n; i++) sum += a[i]!;
-  return { n, mean: sum / n, p50: percentile(a, 0.5), p95: percentile(a, 0.95), p99: percentile(a, 0.99), max: a[n - 1]!, sum };
+  return { n, mean: sum / n, p50: percentile(a, 0.5), p95: percentile(a, 0.95), p99: percentile(a, 0.99), max: a[n - 1]! };
 }
 /** Frame-time histogram: counts of values below each edge, then the overflow. `edges` ascending (ms). */
 export const FRAME_HISTOGRAM_EDGES = [4, 8, 12, 16.7, 20, 25, 33.4, 50, 67, 100, 200, 500, 1000] as const;
@@ -100,7 +101,7 @@ export function histogram(values: ArrayLike<number>, edges: readonly number[] = 
   return out;
 }
 const r3 = (x: number) => Math.round(x * 1000) / 1000;
-export const roundSummary = (s: StageSummary): StageSummary => ({ n: s.n, mean: r3(s.mean), p50: r3(s.p50), p95: r3(s.p95), p99: r3(s.p99), max: r3(s.max), sum: r3(s.sum) });
+export const roundSummary = (s: StageSummary): StageSummary => ({ n: s.n, mean: r3(s.mean), p50: r3(s.p50), p95: r3(s.p95), p99: r3(s.p99), max: r3(s.max) });
 
 // ------------------------------------------------------------------ trace format
 /** One frame's stage times (ms, summed when a stage ran more than once) and call counts, as sent by a worker in `perf` on its frame reply. */
@@ -128,7 +129,7 @@ export interface PerfTrace {
 }
 
 const isNum = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x);
-const isSummary = (s: unknown): s is StageSummary => !!s && typeof s === 'object' && (['n', 'mean', 'p50', 'p95', 'p99', 'max', 'sum'] as const).every((k) => isNum((s as Record<string, unknown>)[k]));
+const isSummary = (s: unknown): s is StageSummary => !!s && typeof s === 'object' && (['n', 'mean', 'p50', 'p95', 'p99', 'max'] as const).every((k) => isNum((s as Record<string, unknown>)[k]));
 /** The contract of a trace: format and version, known stage and counter names, finite ordered statistics. Throws on the first violation. */
 export function validateTrace(t: unknown): PerfTrace {
   if (!t || typeof t !== 'object') throw new Error('trace is not an object');

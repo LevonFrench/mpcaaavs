@@ -25,7 +25,7 @@ import { HARD_MAX_EDGE, HARD_MAX_PIXELS, fitWithin } from './render-resolution.t
 import { NERV_SCENE_CLASSES, NERV_SHOW, type NervPlateId } from './shows/nerv/index.ts';
 import { validateSongMap } from './song-map/validate.ts';
 import { synthesizeWave } from './song-map/synth-wave.ts';
-import { PERF, perfAdd, perfBegin, perfConfigure, perfEnd, perfTake } from './show/perf.ts';
+import { PERF, perfAdd, perfBegin, perfConfigure, perfEnd, perfNow, perfTake } from './perf-worker.ts';
 import { epochNow, parsePerfMode, type PerfMode } from './perf-trace.ts';
 
 const scope = self as unknown as {
@@ -46,7 +46,7 @@ const urlPerf: PerfMode = parsePerfMode(new URL(self.location.href).searchParams
 /** Apply the mode of this render message (its `perf` field, else the URL default) and account the request's time in flight. */
 function perfFrameStart(perf: { readonly mode: PerfMode; readonly sent?: number } | undefined) {
   perfConfigure(perf ? perf.mode : urlPerf);
-  if (PERF.on && perf?.sent !== undefined) { const at = epochNow(); if (Number.isFinite(at)) perfAdd('msg.request', Math.max(0, at - perf.sent)); }
+  if (PERF.on && typeof perf?.sent === 'number' && Number.isFinite(perf.sent)) { const at = epochNow(); if (Number.isFinite(at)) perfAdd('msg.request', Math.max(0, at - perf.sent)); }
 }
 
 /** Timeline entries for planned plates (one scene instance per window). */
@@ -103,20 +103,20 @@ function render(m: ShowRenderMessage) {
   const renderMs = performance.now() - t0;
   const b0 = PERF.on ? perfBegin() : 0;
   const bitmap = canvas.transferToImageBitmap();
-  if (PERF.on) { perfEnd('frame.bitmap', b0); perfAdd('frame.total', performance.now() - t0); }
+  if (PERF.on) { perfEnd('frame.bitmap', b0); perfAdd('frame.total', perfNow() - t0); }
   const e = entries.find((x) => m.time >= x.start && m.time < x.end);
   const perf = perfTake();
-  const r0 = perf ? performance.now() : 0;
+  const r0 = perf ? perfNow() : 0;
   scope.postMessage({ type: 'show-frame', generation: m.generation, sequence: m.sequence, bitmap, width: PW, height: PH, renderMs, plate: e?.id ?? null, ...(perf ? { perf } : {}) }, [bitmap]);
-  if (perf) perfAdd('frame.reply', performance.now() - r0);
+  if (perf) perfAdd('frame.reply', perfNow() - r0);
 }
 
 function pushAudio(m: ShowAudioMessage) {
   if (!live) return; // a song map is loaded: live frames are not needed
   const w = new Uint8Array(m.waveform), sp = new Uint8Array(m.spectrum);
-  const a0 = PERF.on ? performance.now() : 0;
+  const a0 = PERF.on ? perfNow() : 0;
   live.push(m.time, { waveform: [w.subarray(0, 576), w.subarray(576)], spectrum: [sp.subarray(0, 576), sp.subarray(576)], beat: m.beat, beatLevel: m.beatLevel });
-  if (PERF.on) perfAdd('live.push', performance.now() - a0);
+  if (PERF.on) perfAdd('live.push', perfNow() - a0);
 }
 
 // ------------------------------------------------------------------ NERV preset dialect
@@ -194,7 +194,7 @@ async function presetRender(m: AvsWorkerRenderMessage) {
     const { width, height } = fitWithin(m.width, m.height, HARD_MAX_EDGE, HARD_MAX_PIXELS);
     const clock: NervPlaybackFrame = m.nerv ?? { time: 0, localTime: 0, progress: 0, bpm: 120, seed: 1 };
     validateNervClock(clock);
-    const w0 = PERF.on ? performance.now() : 0;
+    const w0 = PERF.on ? perfNow() : 0;
     const w = presetWindow(clock, presetPlate);
     if (w.key !== presetKey) {
       presetLive = new LiveAudioData(w.live);
@@ -202,10 +202,10 @@ async function presetRender(m: AvsWorkerRenderMessage) {
       if (!presetReady) { await presetEngine.init(presetLive); presetReady = true; } else await presetEngine.setAudio(presetLive, presetEntries);
       presetKey = w.key; clocks.clear();
     }
-    if (PERF.on) perfAdd('frame.window', performance.now() - w0);
+    if (PERF.on) perfAdd('frame.window', perfNow() - w0);
     const audio = m.audio ?? NERV_SILENCE;
-    const l0 = PERF.on ? performance.now() : 0;
-    if (m.audio && clock.time !== presetLastTime) { presetLive!.push(clock.time, m.audio); if (PERF.on) perfAdd('live.push', performance.now() - l0); }
+    const l0 = PERF.on ? perfNow() : 0;
+    if (m.audio && clock.time !== presetLastTime) { presetLive!.push(clock.time, m.audio); if (PERF.on) perfAdd('live.push', perfNow() - l0); }
     presetLastTime = clock.time;
     out = surface(out, width, height);
     if (w.previous) {
@@ -214,20 +214,20 @@ async function presetRender(m: AvsWorkerRenderMessage) {
       renderPlate(w.current.key, clock.time); drawFitted(nextOut, width, height);
       const ctx = out.getContext('2d', { alpha: false });
       if (!ctx) throw Error('NERV canvas unavailable');
-      const x0 = PERF.on ? performance.now() : 0;
+      const x0 = PERF.on ? perfNow() : 0;
       drawNervTransition(ctx, oldOut, nextOut, clock, audio, width, height, transition);
-      if (PERF.on) perfAdd('frame.transition', performance.now() - x0);
+      if (PERF.on) perfAdd('frame.transition', perfNow() - x0);
     } else {
       if (oldOut || nextOut) { for (const c of [oldOut, nextOut]) if (c) { c.width = 0; c.height = 0; } oldOut = nextOut = null; transition.transition = null; transition.key = ''; }
       renderPlate(w.current.key, clock.time);
       drawFitted(out, width, height);
     }
-    const b0 = PERF.on ? performance.now() : 0;
+    const b0 = PERF.on ? perfNow() : 0;
     const bitmap = out.transferToImageBitmap(), elapsed = performance.now() - started;
-    if (PERF.on) { perfAdd('frame.bitmap', performance.now() - b0); perfAdd('frame.total', elapsed); }
-    const perf = perfTake(), r0 = perf ? performance.now() : 0;
+    if (PERF.on) { perfAdd('frame.bitmap', perfNow() - b0); perfAdd('frame.total', elapsed); }
+    const perf = perfTake(), r0 = perf ? perfNow() : 0;
     post({ type: 'frame', generation: presetGen, sequence: m.sequence, bitmap, pcm: m.pcm, width, height, unsupported: 0, renderMs: elapsed > 0 ? elapsed : 0, ...(perf ? { perf } : {}) }, [bitmap, m.pcm]);
-    if (perf) perfAdd('frame.reply', performance.now() - r0);
+    if (perf) perfAdd('frame.reply', perfNow() - r0);
   } catch (error) {
     post({ type: 'error', generation: m.generation, message: String(error), fatal: true });
   }
