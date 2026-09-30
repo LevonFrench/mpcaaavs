@@ -24,6 +24,8 @@ export interface SectionInput {
   readonly downbeatConfidence: number;
   /** Bass pitch per frame (MIDI, 0 = unvoiced). Optional: without it low-end presence falls back to the bass band level. */
   readonly bassMidi?: Float32Array;
+  /** Track length in frames, or null while it is unknown (live scan). An island that ends earlier never gets an 'outro'. */
+  readonly trackFrames?: number | null;
 }
 
 export interface SectionResult { readonly sections: SongMapSection[]; readonly confidence: number; readonly boundaries: number[] }
@@ -133,7 +135,7 @@ function stats(list: Bar[], d: Draft, maxDrums: number, maxBass: number, pitched
   };
 }
 
-function label(list: Bar[], drafts: Draft[], pitched: boolean): SectionRole[] {
+function label(list: Bar[], drafts: Draft[], pitched: boolean, atStart: boolean, atEnd: boolean): SectionRole[] {
   const maxDrums = Math.max(1e-9, ...list.map(bar => bar.drums)), maxBass = Math.max(1e-9, ...list.map(bar => bar.bass));
   const st = drafts.map(d => stats(list, d, maxDrums, maxBass, pitched));
   const n = st.length, last = n - 1;
@@ -160,8 +162,8 @@ function label(list: Bar[], drafts: Draft[], pitched: boolean): SectionRole[] {
   for (let i = 0; i < n; i++) {
     if (roles[i]) continue;
     const s = st[i]!;
-    if (i === 0 && (!s.drums || s.energy < .7 * maxE)) roles[i] = 'intro';
-    else if (i === last && i > 0 && (!s.drums || s.energy < .7 * maxE || st[i - 1]!.energy - s.energy > .08)) roles[i] = 'outro';
+    if (i === 0 && atStart && (!s.drums || s.energy < .7 * maxE)) roles[i] = 'intro';
+    else if (i === last && atEnd && i > 0 && (!s.drums || s.energy < .7 * maxE || st[i - 1]!.energy - s.energy > .08)) roles[i] = 'outro';
     else if (!s.drums) roles[i] = !s.low && s.len >= 4 ? 'breakdown' : 'break';
     else roles[i] = 'groove';
   }
@@ -210,7 +212,7 @@ function islandSections(input: SectionInput, a: number, b: number): { drafts: Dr
   const edges = [0, ...kept, n];
   const drafts: Draft[] = [];
   for (let i = 0; i + 1 < edges.length; i++) drafts.push({ a: edges[i]!, b: edges[i + 1]!, start: list[edges[i]!]!.start, end: list[edges[i + 1]! - 1]!.end });
-  const roles = label(list, drafts, input.bassMidi !== undefined);
+  const roles = label(list, drafts, input.bassMidi !== undefined, a === 0, input.trackFrames !== undefined && input.trackFrames !== null && b >= input.trackFrames);
   // A build is one story into its drop: consecutive build sections merge.
   for (let i = drafts.length - 1; i > 0; i--) {
     if (roles[i] === 'build' && roles[i - 1] === 'build') {
