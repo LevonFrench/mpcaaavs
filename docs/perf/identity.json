@@ -1,0 +1,343 @@
+{
+ "format": "aaavs-bench-identity",
+ "version": 1,
+ "created": "2026-09-30T17:54:42.105Z",
+ "rows": [
+  {
+   "plate": "boot",
+   "size": "1920x1080",
+   "noise": {
+    "max": 0,
+    "offPct": 0
+   },
+   "cpu": {
+    "max": 0,
+    "offPct": 0
+   },
+   "sync": {
+    "max": 0,
+    "offPct": 0
+   },
+   "stages": [
+    24,
+    24
+   ],
+   "plainStages": 0
+  },
+  {
+   "plate": "magi",
+   "size": "1920x1080",
+   "noise": {
+    "max": 0,
+    "offPct": 0
+   },
+   "cpu": {
+    "max": 0,
+    "offPct": 0
+   },
+   "sync": {
+    "max": 0,
+    "offPct": 0
+   },
+   "stages": [
+    24,
+    24
+   ],
+   "plainStages": 0
+  },
+  {
+   "plate": "psycho",
+   "size": "1920x1080",
+   "noise": {
+    "max": 0,
+    "offPct": 0
+   },
+   "cpu": {
+    "max": 0,
+    "offPct": 0
+   },
+   "sync": {
+    "max": 0,
+    "offPct": 0
+   },
+   "stages": [
+    25,
+    25
+   ],
+   "plainStages": 0
+  },
+  {
+   "plate": "radar",
+   "size": "1920x1080",
+   "noise": {
+    "max": 6,
+    "offPct": 0.01683063271604938
+   },
+   "cpu": {
+    "max": 6,
+    "offPct": 0.018856095679012346
+   },
+   "sync": {
+    "max": 6,
+    "offPct": 0.03901427469135803
+   },
+   "stages": [
+    26,
+    26
+   ],
+   "plainStages": 0
+  },
+  {
+   "plate": "harmonics",
+   "size": "1920x1080",
+   "noise": {
+    "max": 0,
+    "offPct": 0
+   },
+   "cpu": {
+    "max": 0,
+    "offPct": 0
+   },
+   "sync": {
+    "max": 0,
+    "offPct": 0
+   },
+   "stages": [
+    25,
+    25
+   ],
+   "plainStages": 0
+  },
+  {
+   "plate": "seele",
+   "size": "1920x1080",
+   "noise": {
+    "max": 0,
+    "offPct": 0
+   },
+   "cpu": {
+    "max": 0,
+    "offPct": 0
+   },
+   "sync": {
+    "max": 0,
+    "offPct": 0
+   },
+   "stages": [
+    24,
+    24
+   ],
+   "plainStages": 0
+  },
+  {
+   "plate": "battery",
+   "size": "1920x1080",
+   "noise": {
+    "max": 0,
+    "offPct": 0
+   },
+   "cpu": {
+    "max": 0,
+    "offPct": 0
+   },
+   "sync": {
+    "max": 0,
+    "offPct": 0
+   },
+   "stages": [
+    23,
+    23
+   ],
+   "plainStages": 0
+  },
+  {
+   "plate": "atfield",
+   "size": "1920x1080",
+   "noise": {
+    "max": 1,
+    "offPct": 0.015576774691358024
+   },
+   "cpu": {
+    "max": 1,
+    "offPct": 0.008487654320987654
+   },
+   "sync": {
+    "max": 1,
+    "offPct": 0.016155478395061727
+   },
+   "stages": [
+    25,
+    25
+   ],
+   "plainStages": 0
+  },
+  {
+   "plate": "alert",
+   "size": "1920x1080",
+   "noise": {
+    "max": 2,
+    "offPct": 0.0023148148148148147
+   },
+   "cpu": {
+    "max": 2,
+    "offPct": 0.0016396604938271604
+   },
+   "sync": {
+    "max": 2,
+    "offPct": 0.0014949845679012345
+   },
+   "stages": [
+    25,
+    25
+   ],
+   "plainStages": 0
+  },
+  {
+   "plate": "plug",
+   "size": "1920x1080",
+   "noise": {
+    "max": 0,
+    "offPct": 0
+   },
+   "cpu": {
+    "max": 0,
+    "offPct": 0
+   },
+   "sync": {
+    "max": 0,
+    "offPct": 0
+   },
+   "stages": [
+    25,
+    25
+   ],
+   "plainStages": 0
+  },
+  {
+   "plate": "target",
+   "size": "1920x1080",
+   "noise": {
+    "max": 2,
+    "offPct": 0.001591435185185185
+   },
+   "cpu": {
+    "max": 4,
+    "offPct": 0.0016396604938271604
+   },
+   "sync": {
+    "max": 3,
+    "offPct": 0.0016396604938271604
+   },
+   "stages": [
+    25,
+    25
+   ],
+   "plainStages": 0
+  },
+  {
+   "plate": "city",
+   "size": "1920x1080",
+   "noise": {
+    "max": 0,
+    "offPct": 0
+   },
+   "cpu": {
+    "max": 0,
+    "offPct": 0
+   },
+   "sync": {
+    "max": 0,
+    "offPct": 0
+   },
+   "stages": [
+    25,
+    25
+   ],
+   "plainStages": 0
+  },
+  {
+   "plate": "sync",
+   "size": "1920x1080",
+   "noise": {
+    "max": 7,
+    "offPct": 0.002507716049382716
+   },
+   "cpu": {
+    "max": 7,
+    "offPct": 0.001880787037037037
+   },
+   "sync": {
+    "max": 3,
+    "offPct": 0.0013020833333333333
+   },
+   "stages": [
+    23,
+    23
+   ],
+   "plainStages": 0
+  },
+  {
+   "plate": "berserk",
+   "size": "1920x1080",
+   "noise": {
+    "max": 4,
+    "offPct": 0.009789737654320988
+   },
+   "cpu": {
+    "max": 2,
+    "offPct": 0.0060281635802469135
+   },
+   "sync": {
+    "max": 5,
+    "offPct": 0.011091820987654322
+   },
+   "stages": [
+    24,
+    24
+   ],
+   "plainStages": 0
+  },
+  {
+   "plate": "impact",
+   "size": "1920x1080",
+   "noise": {
+    "max": 0,
+    "offPct": 0
+   },
+   "cpu": {
+    "max": 0,
+    "offPct": 0
+   },
+   "sync": {
+    "max": 0,
+    "offPct": 0
+   },
+   "stages": [
+    23,
+    23
+   ],
+   "plainStages": 0
+  },
+  {
+   "plate": "end",
+   "size": "1920x1080",
+   "noise": {
+    "max": 0,
+    "offPct": 0
+   },
+   "cpu": {
+    "max": 0,
+    "offPct": 0
+   },
+   "sync": {
+    "max": 0,
+    "offPct": 0
+   },
+   "stages": [
+    24,
+    24
+   ],
+   "plainStages": 0
+  }
+ ]
+}

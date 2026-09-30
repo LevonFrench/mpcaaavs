@@ -54,6 +54,8 @@ export interface ShowRenderMessage {
   readonly dt?: number;
   /** Wait for the GPU before replying (timing runs). */
   readonly sync?: boolean;
+  /** Stage timing for this frame (src/perf-worker.ts): mode 1 CPU timestamps, 2 with a GPU wait around GL stages; `sent` = the host's epoch time at postMessage. Absent: off. */
+  readonly perf?: { readonly mode: 0 | 1 | 2; readonly sent?: number };
 }
 
 /**
@@ -98,6 +100,8 @@ export interface ShowFrameMessage {
   readonly renderMs: number;
   /** Plate on screen at this time, or null. */
   readonly plate: string | null;
+  /** Stage times of this frame when `perf` was requested (src/perf-trace.ts WorkerPerfFrame). */
+  readonly perf?: import('../perf-trace.ts').WorkerPerfFrame;
 }
 
 export interface ShowErrorMessage { readonly type: 'show-error'; readonly generation: number; readonly message: string }
@@ -132,6 +136,10 @@ export function validateShowRequest(m: unknown): ShowWorkerRequest {
     if (!Number.isInteger(x.sequence) || !finite(x.time) || (x.time as number) < 0 || (x.time as number) > 6 * 3600) throw new Error('Invalid show clock');
     if (x.dt !== undefined && (!finite(x.dt) || (x.dt as number) <= 0 || (x.dt as number) > 1)) throw new Error('Invalid show clock');
     if (x.sync !== undefined && typeof x.sync !== 'boolean') throw new Error('Invalid show sync flag');
+    if (x.perf !== undefined) {
+      const q = x.perf as Record<string, unknown> | null;
+      if (!q || typeof q !== 'object' || (q.mode !== 0 && q.mode !== 1 && q.mode !== 2) || (q.sent !== undefined && !finite(q.sent))) throw new Error('Invalid show perf flag');
+    }
     return m as ShowRenderMessage;
   }
   if (x.type === 'show-audio') {

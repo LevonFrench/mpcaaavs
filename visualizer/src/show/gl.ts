@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { GLSL_COMMON } from './glsl/common.ts';
 import { SCALE } from './scale.ts';
 import { createCanvas } from './canvas.ts';
+import { PERF, perfAdd, perfBegin, perfEnd, perfNow, perfRegisterLayer } from '../perf-worker.ts';
 
 export { SCALE };
 /** Logical canvas: scenes lay out in these px at every output scale. */
@@ -138,6 +139,7 @@ export class Compositor {
    * For 'multiply' the texture should be a white-background image (premult off).
    */
   draw(renderer: THREE.WebGLRenderer, tex: THREE.Texture, target: THREE.WebGLRenderTarget | null, o: { mode?: BlendMode; opacity?: number; tint?: [number, number, number]; scale?: [number, number]; offset?: [number, number]; premult?: boolean } = {}) {
+    const t0 = PERF.on ? perfBegin() : 0;
     const p = this.get(o.mode ?? 'normal');
     p.u.tex!.value = tex;
     p.u.opacity!.value = o.opacity ?? 1;
@@ -145,6 +147,7 @@ export class Compositor {
     (p.u.uvXform!.value as THREE.Vector4).set(o.scale?.[0] ?? 1, o.scale?.[1] ?? 1, o.offset?.[0] ?? 0, o.offset?.[1] ?? 0);
     p.u.premult!.value = o.premult ?? o.mode !== 'multiply';
     p.render(renderer, target);
+    if (PERF.on) perfEnd('comp.draw', t0);
   }
 }
 
@@ -181,6 +184,10 @@ export function scaleContext2D(c: CanvasRenderingContext2D, s: number) {
   return c;
 }
 
+/** Owner tag for layers constructed right now (set by the engine around a synchronous scene constructor; names profiler stages only). */
+let layerOwner = '', layerSeq = 0, anonLayers = 0;
+export function setLayerOwner(owner: string) { layerOwner = owner; layerSeq = 0; }
+
 /**
  * A 1920x1080 (logical) Canvas2D surface uploaded as an sRGB texture (decoded to linear when sampled).
  * Draw in CSS pixels with origin top-left. Call `upload()` after drawing each frame.
@@ -191,8 +198,13 @@ export class Layer2D {
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D;
   texture: THREE.CanvasTexture;
+  /** Profiler name (layer.<id>.draw / .upload): <plate>#<n> at construction, renamed to <plate>.<field> by the engine. Has no effect on drawing. */
+  id: string;
+  private drawStart = -1;
+  private drawFrame = -1;
   /** `scale`: backing px per drawing px (default SCALE; pass 1 for a deliberately low-res layer, e.g. a soft glow). */
   constructor(public w = W, public h = H, scale = SCALE) {
+    this.id = layerOwner ? `${layerOwner}#${layerSeq++}` : `layer#${anonLayers++}`;
     this.canvas = createCanvas(Math.round(w * scale), Math.round(h * scale));
     this.ctx = scaleContext2D(this.canvas.getContext('2d')!, scale);
     this.texture = new THREE.CanvasTexture(this.canvas);
@@ -200,8 +212,10 @@ export class Layer2D {
     this.texture.minFilter = THREE.LinearFilter;
     this.texture.generateMipmaps = false;
     this.texture.flipY = true;
+    perfRegisterLayer(this.canvas, this);
   }
   clear(color?: string) {
+    if (PERF.on && (this.drawStart < 0 || this.drawFrame !== PERF.frame)) { this.drawStart = perfNow(); this.drawFrame = PERF.frame; }
     const c = this.ctx;
     c.setTransform(1, 0, 0, 1, 0, 0);
     c.globalAlpha = 1;
@@ -211,7 +225,16 @@ export class Layer2D {
     if (color) { c.fillStyle = color; c.fillRect(0, 0, this.w, this.h); }
     else c.clearRect(0, 0, this.w, this.h);
   }
-  upload() { this.texture.needsUpdate = true; return this.texture; }
+  upload() {
+    if (PERF.on && this.drawStart >= 0 && this.drawFrame === PERF.frame) {
+      // the draw span: first clear() of this frame to this call (Canvas2D command recording; the raster is flushed by the texture upload)
+      const d = perfNow() - this.drawStart;
+      perfAdd(`layer.${this.id}.draw`, d); perfAdd('canvas2d.draw', d);
+    }
+    this.drawStart = -1;
+    this.texture.needsUpdate = true;
+    return this.texture;
+  }
 }
 
 /** Clear a render target to a linear colour. */

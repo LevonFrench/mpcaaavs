@@ -3,6 +3,7 @@
 // film grain, vignette, fades/flash. Operates on the composited HDR (linear) frame.
 import * as THREE from 'three';
 import { FSPass, makeRT, W, H, SCALE } from './gl.ts';
+import { PERF, perfBegin, perfEnd } from '../perf-worker.ts';
 
 /** The tone shoulder (linear HDR -> 0..1 linear), shared with the engine's sampling error estimate. */
 export const SHOULDER_GLSL = /* glsl */ `
@@ -167,6 +168,7 @@ ${SCALE === 1 ? `        float g1 = hash12(gl_FragCoord.xy + fract(time * 13.37)
   /** Apply the chain: src (HDR linear) -> out (sRGB 8-bit target or screen). */
   render(renderer: THREE.WebGLRenderer, src: THREE.Texture, hud: THREE.Texture, out: THREE.WebGLRenderTarget | null, p: PostParams, time: number) {
     // bloom pyramid
+    const b0 = PERF.on ? perfBegin() : 0;
     this.prefilter.u.src!.value = src;
     (this.prefilter.u.texel!.value as THREE.Vector2).set(1 / W, 1 / H);
     this.prefilter.u.threshold!.value = p.bloomThreshold;
@@ -189,6 +191,7 @@ ${SCALE === 1 ? `        float g1 = hash12(gl_FragCoord.xy + fract(time * 13.37)
       this.up.render(renderer, this.ups[i]!);
       prevTex = this.ups[i]!.texture;
     }
+    if (PERF.on) perfEnd('post.bloom', b0);
     const f = this.final.u;
     f.src!.value = src;
     f.bloomTex!.value = this.ups[0]!.texture;
@@ -207,6 +210,8 @@ ${SCALE === 1 ? `        float g1 = hash12(gl_FragCoord.xy + fract(time * 13.37)
     f.zoom!.value = p.zoom;
     f.invert!.value = p.invert;
     (f.shake!.value as THREE.Vector2).set(p.shake[0], p.shake[1]);
+    const f0 = PERF.on ? perfBegin() : 0;
     this.final.render(renderer, out);
+    if (PERF.on) perfEnd('post.final', f0);
   }
 }

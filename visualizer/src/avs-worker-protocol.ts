@@ -78,6 +78,8 @@ export interface AvsWorkerRenderMessage {
   /** Policy-resolved render size. */
   readonly width: number;
   readonly height: number;
+  /** Stage timing (src/perf-worker.ts), honoured by the show worker only and absent (off) by default: mode 1 CPU timestamps, 2 with a GPU wait around GL stages; `sent` = the host's epoch time at postMessage. */
+  readonly perf?: { readonly mode: 0 | 1 | 2; readonly sent?: number };
 }
 
 export interface AvsWorkerClearMessage {
@@ -165,6 +167,8 @@ export interface AvsWorkerFrameMessage {
     readonly skipped: number; readonly flashEvents: number; readonly degraded: number;
   };
   readonly renderMs: number;
+  /** Per-stage timing of this frame (show worker only, and only when the render message asked for it: src/perf-trace.ts). */
+  readonly perf?: import('./perf-trace.ts').WorkerPerfFrame;
 }
 
 export interface AvsWorkerErrorMessage {
