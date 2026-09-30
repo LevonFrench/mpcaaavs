@@ -16,7 +16,7 @@ export const ASSET_PACK_MANIFEST_FILE = 'pack.json';
 export const ASSET_PACK_LIMITS = Object.freeze({
   manifestBytes: 512 * 1024, atlasBytes: 8 * 1024 * 1024, atlasDimension: 4096, atlases: 16, palettes: 16, paletteColors: 256, cycles: 8,
   regions: 4096, clips: 2048, fonts: 16, frames: 256, glyphs: 256, tags: 8, tagChars: 24, idChars: 64, nameChars: 48, captionChars: 24,
-  hold: 600, big: 8, screenSlots: 32, cursors: 32, drops: 16, clipVerbsPerActor: 32, issues: 64, coordinate: 8192,
+  hold: 600, big: 8, screenSlots: 32, cursors: 32, drops: 16, clipVerbsPerActor: 32, issues: 64, coordinate: 8192, parts: 8,
 });
 
 /** The eleven roles of SPRITE-SHOW-KIT.md. A region's `role` is one of these; `clip` marks a bare animation frame cell. */
@@ -52,7 +52,9 @@ export type Point = readonly [x: number, y: number];
 /** Atlas pixels: `[x, y, width, height]`. */
 export type Rect = readonly [x: number, y: number, width: number, height: number];
 export interface NineSlice { readonly left: number; readonly top: number; readonly right: number; readonly bottom: number }
-export interface AtlasDef { readonly file: string; readonly width: number; readonly height: number; readonly filter: ImageFilter }
+/** `indexed` (optional, sprite layer): the PNG stores palette indices in its red channel (alpha = coverage) and regions or clips name the
+ * palette that colours it; a different palette recolours the same art. Absent or false: the PNG is plain colour. */
+export interface AtlasDef { readonly file: string; readonly width: number; readonly height: number; readonly filter: ImageFilter; readonly indexed?: boolean }
 /** `beats` is the period of one full cycle of `from..to` (inclusive palette indices) in beats. */
 export interface PaletteCycle { readonly from: number; readonly to: number; readonly beats: number }
 export interface PaletteDef { readonly colors: readonly string[]; readonly cycles: readonly PaletteCycle[] }
@@ -98,6 +100,17 @@ export interface ScreenRegion extends RegionCommon {
 export type Region = ActorRegion | ClipCellRegion | ProjectileRegion | EffectRegion | PickupRegion | PropRegion | BackgroundRegion | HudRegion
   | TextRegion | TransitionRegion | ScreenRegion;
 
+/** A detached part of a clip (a weapon, a cape, a held prop) drawn beside the body frame with its own atlas rectangle per frame.
+ * `rects[i]` is null when the part is absent in frame i; `offsets[i]` is the part rectangle's top-left relative to the body frame's
+ * anchor (the feet), in unflipped pixels. Both have one entry per frame. */
+export interface ClipPart {
+  readonly atlas: string;
+  readonly rects: readonly (Rect | null)[];
+  readonly offsets: readonly (readonly [number, number])[];
+  readonly layer: 'front' | 'back';
+  readonly palette?: string;
+}
+
 /** One animation strip: `frames` (region ids) or `strip` (equal cells of one atlas rectangle, resolved to `cells`). */
 export interface ClipDef {
   readonly verb: ClipVerb;
@@ -112,6 +125,11 @@ export interface ClipDef {
   readonly anchors: readonly Point[] | null;
   readonly palette?: string;
   readonly length: number;
+  /** Optional (sprite layer): per-frame offset of the frame's atlas rectangle inside the untrimmed source frame. When present, `anchors` are
+   * measured in the untrimmed frame (they may lie outside the trimmed rectangle), so the anchor inside the rectangle is `anchor - trim`. */
+  readonly trims?: readonly Point[];
+  /** Optional (sprite layer): detached parts by name. */
+  readonly parts?: Readonly<Record<string, ClipPart>>;
 }
 export interface FontDef {
   readonly role: FontRole;
@@ -253,14 +271,15 @@ export function checkAssetPackManifest(input: unknown): ManifestCheck {
       if (!c.id(name, path)) continue;
       const item = c.record(atlasSource[name], path);
       if (!item) continue;
-      c.keys(item, path, ['file', 'width', 'height', 'filter']);
+      c.keys(item, path, ['file', 'width', 'height', 'filter', 'indexed']);
       const problem = packPathProblem(item.file, ['.png']);
       if (problem) c.error(`${path}.file`, problem);
       else if (files.has((item.file as string).toLowerCase())) c.error(`${path}.file`, 'is used by another atlas');
       else files.add((item.file as string).toLowerCase());
       const width = c.int(item.width, `${path}.width`, 1, ASSET_PACK_LIMITS.atlasDimension), height = c.int(item.height, `${path}.height`, 1, ASSET_PACK_LIMITS.atlasDimension);
       const filter = item.filter === undefined ? 'nearest' : c.oneOf(item.filter, `${path}.filter`, IMAGE_FILTERS);
-      if (!problem && width !== null && height !== null && filter !== null) atlases[name] = { file: item.file as string, width, height, filter };
+      const indexed = item.indexed === undefined ? false : c.bool(item.indexed, `${path}.indexed`);
+      if (!problem && width !== null && height !== null && filter !== null && indexed !== null) atlases[name] = { file: item.file as string, width, height, filter, ...(indexed ? { indexed: true } : {}) };
     }
   }
 
@@ -545,7 +564,7 @@ function checkClip(c: Checker, value: unknown, path: string, atlases: Record<str
   const before = c.issues.length;
   const item = c.record(value, path);
   if (!item) return null;
-  c.keys(item, path, ['verb', 'loop', 'hold', 'big', 'frames', 'strip', 'anchors', 'palette']);
+  c.keys(item, path, ['verb', 'loop', 'hold', 'big', 'frames', 'strip', 'anchors', 'palette', 'trims', 'parts']);
   const verb = c.oneOf(item.verb, `${path}.verb`, CLIP_VERBS);
   const loop = item.loop === undefined ? false : c.bool(item.loop, `${path}.loop`);
   if ((item.frames === undefined) === (item.strip === undefined)) c.error(path, 'needs exactly one of frames or strip');
@@ -607,13 +626,25 @@ function checkClip(c: Checker, value: unknown, path: string, atlases: Record<str
       else big.push(n);
     });
   }
+  let trims: Point[] | undefined;
+  if (item.trims !== undefined) {
+    if (!Array.isArray(item.trims) || item.trims.length !== length) c.error(`${path}.trims`, `must have one [x, y] offset per frame (${length})`);
+    else {
+      trims = [];
+      item.trims.forEach((entry, index) => {
+        const point = c.point(entry, `${path}.trims[${index}]`, ASSET_PACK_LIMITS.coordinate, ASSET_PACK_LIMITS.coordinate);
+        if (point) trims!.push(point);
+      });
+    }
+  }
   let anchors: Point[] | null = null;
   if (item.anchors !== undefined) {
     if (!Array.isArray(item.anchors) || item.anchors.length !== length) c.error(`${path}.anchors`, `must have one point per frame (${length})`);
     else {
       anchors = [];
       item.anchors.forEach((entry, index) => {
-        const cell = cells[index] ?? [ASSET_PACK_LIMITS.coordinate, ASSET_PACK_LIMITS.coordinate];
+        // with trims the anchor is measured in the untrimmed frame, so it may lie outside the trimmed cell
+        const cell = trims !== undefined || item.trims !== undefined ? [ASSET_PACK_LIMITS.coordinate, ASSET_PACK_LIMITS.coordinate] as const : cells[index] ?? [ASSET_PACK_LIMITS.coordinate, ASSET_PACK_LIMITS.coordinate];
         const point = c.point(entry, `${path}.anchors[${index}]`, cell[0], cell[1]);
         if (point) anchors!.push(point);
       });
@@ -624,8 +655,55 @@ function checkClip(c: Checker, value: unknown, path: string, atlases: Record<str
     if (typeof item.palette === 'string' && Object.hasOwn(palettes, item.palette)) palette = item.palette;
     else c.error(`${path}.palette`, 'refers to an unknown palette');
   }
+  let parts: Record<string, ClipPart> | undefined;
+  if (item.parts !== undefined) {
+    const where = `${path}.parts`, table = c.record(item.parts, where);
+    if (table) {
+      const names = Object.keys(table);
+      if (names.length > ASSET_PACK_LIMITS.parts) c.error(where, `at most ${ASSET_PACK_LIMITS.parts} parts`);
+      parts = {};
+      for (const name of names.slice(0, ASSET_PACK_LIMITS.parts)) {
+        const part = checkPart(c, table[name], `${where}.${name.slice(0, 32)}`, length, atlases, palettes);
+        if (!c.id(name, `${where}.${name.slice(0, 32)}`)) continue;
+        if (part) parts[name] = part;
+      }
+    }
+  }
   if (c.issues.length > before || verb === null || loop === null || length === 0) return null;
-  return { verb, loop, hold, big: big.sort((a, b) => a - b), frames, strip, anchors, ...(palette === undefined ? {} : { palette }), length };
+  return { verb, loop, hold, big: big.sort((a, b) => a - b), frames, strip, anchors, ...(palette === undefined ? {} : { palette }), length, ...(trims === undefined ? {} : { trims }), ...(parts === undefined ? {} : { parts }) };
+}
+
+function checkPart(c: Checker, value: unknown, path: string, length: number, atlases: Record<string, AtlasDef>, palettes: Record<string, PaletteDef>): ClipPart | null {
+  const before = c.issues.length;
+  const item = c.record(value, path);
+  if (!item) return null;
+  c.keys(item, path, ['atlas', 'rects', 'offsets', 'layer', 'palette']);
+  const atlasId = typeof item.atlas === 'string' ? item.atlas : '';
+  const atlas = Object.hasOwn(atlases, atlasId) ? atlases[atlasId]! : null;
+  if (!atlas) c.error(`${path}.atlas`, 'refers to an unknown atlas');
+  const rects: Array<Rect | null> = [];
+  if (!Array.isArray(item.rects) || item.rects.length !== length) c.error(`${path}.rects`, `must have one rectangle (or null) per frame (${length})`);
+  else item.rects.forEach((entry, index) => {
+    if (entry === null) { rects.push(null); return; }
+    const rect = atlas ? c.rect(entry, `${path}.rects[${index}]`, atlas.width, atlas.height) : null;
+    if (rect) rects.push(rect);
+  });
+  const offsets: Array<readonly [number, number]> = [];
+  if (!Array.isArray(item.offsets) || item.offsets.length !== length) c.error(`${path}.offsets`, `must have one [x, y] offset per frame (${length})`);
+  else item.offsets.forEach((entry, index) => {
+    const where = `${path}.offsets[${index}]`;
+    if (!Array.isArray(entry) || entry.length !== 2) { c.error(where, 'must be [x, y]'); return; }
+    const x = c.int(entry[0], `${where}[0]`, -ASSET_PACK_LIMITS.coordinate, ASSET_PACK_LIMITS.coordinate), y = c.int(entry[1], `${where}[1]`, -ASSET_PACK_LIMITS.coordinate, ASSET_PACK_LIMITS.coordinate);
+    if (x !== null && y !== null) offsets.push([x, y] as const);
+  });
+  const layer = item.layer === undefined ? 'front' : c.oneOf(item.layer, `${path}.layer`, ['front', 'back'] as const);
+  let palette: string | undefined;
+  if (item.palette !== undefined) {
+    if (typeof item.palette === 'string' && Object.hasOwn(palettes, item.palette)) palette = item.palette;
+    else c.error(`${path}.palette`, 'refers to an unknown palette');
+  }
+  if (c.issues.length > before || !atlas || layer === null) return null;
+  return { atlas: atlasId, rects, offsets, layer, ...(palette === undefined ? {} : { palette }) };
 }
 
 function checkFont(c: Checker, value: unknown, path: string, atlases: Record<string, AtlasDef>, palettes: Record<string, PaletteDef>): FontDef | null {
