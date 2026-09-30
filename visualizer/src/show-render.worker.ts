@@ -25,6 +25,7 @@ import { HARD_MAX_EDGE, HARD_MAX_PIXELS, fitWithin } from './render-resolution.t
 import { NERV_SCENE_CLASSES, NERV_SHOW, type NervPlateId } from './shows/nerv/index.ts';
 import { validateSongMap } from './song-map/validate.ts';
 import { synthesizeWave } from './song-map/synth-wave.ts';
+import { receiveShowPack } from './show/pack-registry.ts';
 
 const scope = self as unknown as {
   onmessage: ((event: MessageEvent<unknown>) => void) | null;
@@ -218,6 +219,7 @@ scope.onmessage = ({ data }) => {
     try {
       const m = validateShowRequest(data);
       gen = m.generation;
+      if (m.type === 'show-pack') { debug(`asset pack ${(await receiveShowPack(m)).status}`); return; } // host-wide, never dropped by a show generation
       if (m.type === 'show-init') { generation = m.generation; await init(m); return; }
       if (m.generation !== generation) return;
       if (m.type === 'show-audio') { pushAudio(m); return; }

@@ -38,7 +38,14 @@ const TYPES = {
   '.svg':  'image/svg+xml',
 };
 
-const handleLibrary = createLibraryHandler(root);
+// Private show asset packs (docs/design/ASSET-PACK-MANIFEST.md): the directory holding `<pack-id>/pack.json` folders, read-only through the
+// library server. Chosen here, never by the page: `--show-packs <dir>`, else AAAVS_SHOW_PACKS, else the conventional show-assets-private/
+// beside the page when it exists. With none of these the show-pack operations are refused.
+const flag = process.argv.indexOf('--show-packs');
+const conventional = resolve(root, 'show-assets-private');
+const showPacks = flag >= 0 ? process.argv[flag + 1] : process.env.AAAVS_SHOW_PACKS || (existsSync(conventional) ? conventional : undefined);
+if (flag >= 0 && !showPacks) { console.error('usage: --show-packs <directory>'); process.exit(2); }
+const handleLibrary = createLibraryHandler(root, { showPacks });
 const server = createServer(async (req, res) => {
   if (await handleLibrary(req, res)) return;
   const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
@@ -238,6 +245,7 @@ osc.on('error', (error) => {
 server.listen(port, '127.0.0.1', () => {
   const httpPort = server.address().port;
   console.log(`aaavs  →  http://127.0.0.1:${httpPort}`);
+  if (showPacks) console.log(`aaavs show packs  →  ${resolve(showPacks)} (read-only, set with ?pack=<id> or localStorage mpcaaavs.showPack)`);
   osc.bind(oscPort, '127.0.0.1', () => {
     console.log(`aaavs osc  →  udp 127.0.0.1:${osc.address().port}  →  ws://127.0.0.1:${httpPort}/osc`);
   });

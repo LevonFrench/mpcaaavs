@@ -30,12 +30,16 @@ import { MultiViewSession } from './multi-view-session.ts';
 import { isInteractiveTarget } from './keyboard-guard.ts';
 import { bridgeLibraryCall, createHostSongMap } from './song-map/host.ts';
 import type { SongMapSession } from './song-map/session.ts';
+import { createHostShowPacks, isShowWorkerLocation, type ShowPackProvider } from './show/pack-host.ts';
+import { fetchPackSource } from './asset-packs/source.ts';
 interface Bridge { postMessage(message: string): void; addEventListener(type: 'message', listener: (event: MessageEvent) => void): void }
 // Both players run this host. Only media transport and library persistence vary.
-const platform = window as unknown as { chrome?: { webview?: Bridge }; aaavsBridge?: Bridge; aaavsSongMap?: SongMapSession | null };
+const platform = window as unknown as { chrome?: { webview?: Bridge }; aaavsBridge?: Bridge; aaavsSongMap?: SongMapSession | null; aaavsShowPacks?: ShowPackProvider };
 const bridge = platform.chrome?.webview ?? platform.aaavsBridge;
 // One song map per page: the standalone Player publishes its own (full-file scan); the MPC host builds one from the PCM it receives.
 const songMap = platform.aaavsSongMap !== undefined ? platform.aaavsSongMap : (platform.aaavsSongMap = createHostSongMap({ call: bridge ? bridgeLibraryCall(bridge) : null, now: () => performance.now() }));
+// Private show asset pack (device-local setting, none by default): the Player publishes a provider over its library server; the MPC host reads show-assets-private/<id>/ beside the page.
+const showPacks = platform.aaavsShowPacks ?? (platform.aaavsShowPacks = createHostShowPacks({ source: id => fetchPackSource(id) }));
 const canvas = document.querySelector<HTMLCanvasElement>('#visualizer')!;
 const context = canvas.getContext('2d', { alpha: false })!;
 const timing = document.querySelector<HTMLElement>('#timing')!;
@@ -399,7 +403,8 @@ async function prepare(index: number, automatic: boolean, clockTarget?:ScenePhas
       new Promise<never>((_, reject) => { fetchTimer = window.setTimeout(() => reject(new Error('Preset fetch timed out')), 15000); }),
     ]).finally(() => clearTimeout(fetchTimer));
     if (current !== ticket) return;
-    const worker = new Worker(sceneWorkerLocation(preset.kind, import.meta.url), { type: 'module' });
+    const workerUrl = sceneWorkerLocation(preset.kind, import.meta.url), worker = new Worker(workerUrl, { type: 'module' });
+    if (isShowWorkerLocation(workerUrl)) showPacks.attach(worker);
     const slot: Slot = { stashed:new Set(),stashPending:null,sentAt: 0, sized: '', audio: new AudioHold(), worker, generation: ++generation, index, busy: false, ready: false, bitmap: null, timeout: 0, dead: false, start:position,renderRevision:clockRevision,renderedPosition:NaN,lastAudio:latestAudio };
     slot.audio.push(latestAudio);
     prepared = slot;

@@ -4,6 +4,7 @@ import { defaultSettings, type SetupSettings } from './mpc-setups.ts';
 import { TRANSITIONS } from './mpc-transition.ts';
 import { contentId, decodeToSource, MAX_DECODE_SECONDS } from './song-map/decode.ts';
 import { createHostSongMap, httpLibraryCall } from './song-map/host.ts';
+import { createHostShowPacks, httpPackSource } from './show/pack-host.ts';
 
 interface PcmPacket { epoch:number; time:number; sampleRate:number; samples:number; pcm:ArrayBuffer; discontinuity?:boolean }
 interface AudioFrame { time:number; sampleRate:number; samples:number; pcm:number[] }
@@ -181,6 +182,8 @@ export async function startStandalonePlayer():Promise<void> {
   // The song map: a background scan of each opened file, shared with the host and shows through window.aaavsSongMap.
   const songMap=createHostSongMap({call:httpLibraryCall(),now:()=>performance.now()});
   (window as unknown as {aaavsSongMap:unknown}).aaavsSongMap=songMap;
+  // The private show asset pack named by the device-local setting (none by default), read through the library server.
+  (window as unknown as {aaavsShowPacks:unknown}).aaavsShowPacks=createHostShowPacks({source:id=>httpPackSource(id)});
   let fileToken=0;
   /** Cache lookup by content hash, then decode and scan on a miss. Never blocks playback; a superseded file is abandoned. */
   async function startSongMap(selected:File,token:number):Promise<void> {
