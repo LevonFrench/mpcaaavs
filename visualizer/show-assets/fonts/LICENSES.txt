@@ -1,0 +1,308 @@
+Fonts bundled for the AAAVS show engine (visualizer/show-assets/fonts)
+
+The Latin fonts and stroke fonts are the files shipped by bizarro/evangelion (app/public/fonts):
+static width/weight instances generated from the Archivo and Cormorant Garamond variable fonts,
+IBM Plex Mono, and the EMS / Hershey single-stroke SVG fonts. jp/ holds subsets of Noto Sans JP and
+Noto Serif JP (variable, all weights kept) limited to the glyphs the NERV plates draw plus kana,
+CJK punctuation, fullwidth forms, ASCII and Latin-1, made with fontTools.subset. Subsetting is a
+modification permitted by the OFL; no Reserved Font Name is used.
+
+
+  Archivo-w1000-300.ttf  (Archivo SemiBold Regular)
+  Archivo-w1000-500.ttf  (Archivo SemiBold Regular)
+  Archivo-w1000-700.ttf  (Archivo SemiBold Regular)
+  Archivo-w1000-900.ttf  (Archivo SemiBold Regular)
+  Archivo-w1125-300.ttf  (Archivo SemiBold Regular)
+  Archivo-w1125-500.ttf  (Archivo SemiBold Regular)
+  Archivo-w1125-700.ttf  (Archivo SemiBold Regular)
+  Archivo-w1125-900.ttf  (Archivo SemiBold Regular)
+  Archivo-w1250-300.ttf  (Archivo SemiBold Regular)
+  Archivo-w1250-500.ttf  (Archivo SemiBold Regular)
+  Archivo-w1250-700.ttf  (Archivo SemiBold Regular)
+  Archivo-w1250-900.ttf  (Archivo SemiBold Regular)
+  Archivo-w620-300.ttf  (Archivo SemiBold Regular)
+  Archivo-w620-500.ttf  (Archivo SemiBold Regular)
+  Archivo-w620-700.ttf  (Archivo SemiBold Regular)
+  Archivo-w620-900.ttf  (Archivo SemiBold Regular)
+  Archivo-w750-300.ttf  (Archivo SemiBold Regular)
+  Archivo-w750-500.ttf  (Archivo SemiBold Regular)
+  Archivo-w750-700.ttf  (Archivo SemiBold Regular)
+  Archivo-w750-900.ttf  (Archivo SemiBold Regular)
+  Archivo-w875-300.ttf  (Archivo SemiBold Regular)
+  Archivo-w875-500.ttf  (Archivo SemiBold Regular)
+  Archivo-w875-700.ttf  (Archivo SemiBold Regular)
+  Archivo-w875-900.ttf  (Archivo SemiBold Regular)
+  ArchivoItalic-w1000-400.ttf  (Archivo SemiBold Italic)
+  ArchivoItalic-w1000-800.ttf  (Archivo SemiBold Italic)
+  ArchivoItalic-w750-400.ttf  (Archivo SemiBold Italic)
+  ArchivoItalic-w750-800.ttf  (Archivo SemiBold Italic)
+  Copyright: Copyright 2020 The Archivo Project Authors (https://github.com/Omnibus-Type/Archivo)
+  License:   This Font Software is licensed under the SIL Open Font License, Version 1.1. This license is available with a FAQ at: http://scripts.sil.org/OFL
+
+  Cormorant-400.ttf  (Cormorant Garamond Light Regular)
+  Cormorant-600.ttf  (Cormorant Garamond Light Regular)
+  CormorantItalic-400.ttf  (Cormorant Garamond Light Italic)
+  CormorantItalic-600.ttf  (Cormorant Garamond Light Italic)
+  Copyright: Copyright 2015 The Cormorant Project Authors (github.com/CatharsisFonts/Cormorant)
+  License:   This Font Software is licensed under the SIL Open Font License, Version 1.1. This license is available with a FAQ at: https://openfontlicense.org
+
+  jp/NotoSansJP-subset.woff2  (Noto Sans JP Thin Regular)
+  Copyright: (c) 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'.
+  License:   This Font Software is licensed under the SIL Open Font License, Version 1.1. This license is available with a FAQ at: https://scripts.sil.org/OFL
+
+  jp/NotoSerifJP-subset.woff2  (Noto Serif JP ExtraLight Regular)
+  Copyright: (c) 2017-2024 Adobe (http://www.adobe.com/).
+  License:   This Font Software is licensed under the SIL Open Font License, Version 1.1. This license is available with a FAQ at: https://openfontlicense.org
+
+  src/IBMPlexMono-Bold.ttf  (IBM Plex Mono Bold)
+  src/IBMPlexMono-Italic.ttf  (IBM Plex Mono Italic)
+  src/IBMPlexMono-Light.ttf  (IBM Plex Mono Light Regular)
+  src/IBMPlexMono-Medium.ttf  (IBM Plex Mono Medium Regular)
+  src/IBMPlexMono-Regular.ttf  (IBM Plex Mono Regular)
+  src/IBMPlexMono-SemiBold.ttf  (IBM Plex Mono SemiBold Regular)
+  Copyright: Copyright 2017 IBM Corp. All rights reserved.
+  License:   This Font Software is licensed under the SIL Open Font License, Version 1.1. This license is available with a FAQ at: http://scripts.sil.org/OFL
+
+  stroke/EMSAllure.svg
+    Font name:               EMS Allure
+    License:                 SIL Open Font License http://scripts.sil.org/OFL
+    Created by:              Sheldon B. Michaels
+    SVG font conversion by:  Windell H. Oskay
+    A derivative of:         Allura
+    Designer:                Rob Leuschke, TypeSETit
+    Link:                    http://www.typesetit.com
+    Google font page:        https://fonts.google.com/specimen/Allura
+
+  stroke/EMSFelix.svg
+    Font name:               EMS Felix
+    License:                 SIL Open Font License http://scripts.sil.org/OFL
+    Created by:              Sheldon B. Michaels
+    SVG font conversion by:  Windell H. Oskay
+    A derivative of:         Felipa
+    Designer:                Fontstage
+    Link:                    https://twitter.com/fontstage
+    Google font page:        https://fonts.google.com/specimen/Felipa
+
+  stroke/EMSOsmotron.svg
+    Font name:               EMS Osmotron
+    License:                 SIL Open Font License http://scripts.sil.org/OFL
+    Created by:              Sheldon B. Michaels
+    SVG font conversion by:  Windell H. Oskay
+    A derivative of:         Orbitron (Regular)
+    Designer:                Matt McInerney, the League of Moveable Type
+    Link:                    https://www.theleagueofmoveabletype.com
+    Google font page:        https://fonts.google.com/specimen/Orbitron
+
+  stroke/EMSReadability.svg
+    Font name:               EMS Readability
+    License:                 SIL Open Font License http://scripts.sil.org/OFL
+    Created by:              Sheldon B. Michaels
+    SVG font conversion by:  Windell H. Oskay
+    A derivative of:         Source Sans Pro-Light
+    Designer:                Paul D. Hunt, Adobe
+    Link:                    http://www.adobe.com
+    Google font page:        https://fonts.google.com/specimen/Source+Sans+Pro
+
+  stroke/EMSTech.svg
+    Font name:               EMS Tech
+    License:                 SIL Open Font License http://scripts.sil.org/OFL
+    Created by:              Sheldon B. Michaels
+    SVG font conversion by:  Windell H. Oskay
+    A derivative of:         Architects Daughter
+    Designer:                Kimberly Geswein, Kimberly Geswein Fonts
+    Link:                    http://www.kimberlygeswein.com/
+    Google font page:        https://fonts.google.com/specimen/Architects+Daughter
+
+  stroke/HersheySans1.svg
+    Font name: Hershey Sans 1-stroke
+    
+    Originally prepared in 2011 and converted to SVG fonts
+    in 2019 by Windell H. Oskay, www.evilmadscientist.com
+    
+    Contents adapted from emergent.unpythonic.net/software/hershey
+     by way of "Hershey Fonts in SVG" by Marty McGuire
+     http://www.thingiverse.com/thing:6168
+     
+    -------------------------------------------------------------------
+    The Hershey Fonts are a set of vector fonts with a liberal license.
+    
+    USE RESTRICTION:
+        This distribution of the Hershey Fonts may be used by anyone for
+        any purpose, commercial or otherwise, providing that:
+            1. The following acknowledgements must be distributed with
+                the font data:
+                - The Hershey Fonts were originally created by Dr.
+                    A. V. Hershey while working at the U. S.
+                    National Bureau of Standards.
+                - The format of the Font data in this distribution
+                    was originally created by
+                        James Hurt
+                        Cognition, Inc.
+                        900 Technology Park Drive
+                        Billerica, MA 01821
+                        (mit-eddie!ci-dandelion!hurt)
+            2. The font data in this distribution may be converted into
+                any other format *EXCEPT* the format distributed by
+                the U.S. NTIS where each point is described
+                in eight bytes as "xxx yyy:", where xxx and yyy are
+                the coordinate values as ASCII numbers.
+
+  stroke/HersheyScript1.svg
+    Font name: Hershey Script 1-stroke
+    
+    Originally prepared in 2011 and converted to SVG fonts
+    in 2019 by Windell H. Oskay, www.evilmadscientist.com
+    
+    Contents adapted from emergent.unpythonic.net/software/hershey
+     by way of "Hershey Fonts in SVG" by Marty McGuire
+     http://www.thingiverse.com/thing:6168
+     
+    -------------------------------------------------------------------
+    The Hershey Fonts are a set of vector fonts with a liberal license.
+    
+    USE RESTRICTION:
+        This distribution of the Hershey Fonts may be used by anyone for
+        any purpose, commercial or otherwise, providing that:
+            1. The following acknowledgements must be distributed with
+                the font data:
+                - The Hershey Fonts were originally created by Dr.
+                    A. V. Hershey while working at the U. S.
+                    National Bureau of Standards.
+                - The format of the Font data in this distribution
+                    was originally created by
+                        James Hurt
+                        Cognition, Inc.
+                        900 Technology Park Drive
+                        Billerica, MA 01821
+                        (mit-eddie!ci-dandelion!hurt)
+            2. The font data in this distribution may be converted into
+                any other format *EXCEPT* the format distributed by
+                the U.S. NTIS where each point is described
+                in eight bytes as "xxx yyy:", where xxx and yyy are
+                the coordinate values as ASCII numbers.
+
+  stroke/HersheySerifMed.svg
+    Font name: Hershey Serif medium
+    
+    Originally prepared in 2011 and converted to SVG fonts
+    in 2019 by Windell H. Oskay, www.evilmadscientist.com
+    
+    Contents adapted from emergent.unpythonic.net/software/hershey
+     by way of "Hershey Fonts in SVG" by Marty McGuire
+     http://www.thingiverse.com/thing:6168
+     
+    -------------------------------------------------------------------
+    The Hershey Fonts are a set of vector fonts with a liberal license.
+    
+    USE RESTRICTION:
+        This distribution of the Hershey Fonts may be used by anyone for
+        any purpose, commercial or otherwise, providing that:
+            1. The following acknowledgements must be distributed with
+                the font data:
+                - The Hershey Fonts were originally created by Dr.
+                    A. V. Hershey while working at the U. S.
+                    National Bureau of Standards.
+                - The format of the Font data in this distribution
+                    was originally created by
+                        James Hurt
+                        Cognition, Inc.
+                        900 Technology Park Drive
+                        Billerica, MA 01821
+                        (mit-eddie!ci-dandelion!hurt)
+            2. The font data in this distribution may be converted into
+                any other format *EXCEPT* the format distributed by
+                the U.S. NTIS where each point is described
+                in eight bytes as "xxx yyy:", where xxx and yyy are
+                the coordinate values as ASCII numbers.
+
+
+==================================================================
+SIL OPEN FONT LICENSE Version 1.1 (applies to every font above except the Hershey fonts)
+==================================================================
+
+-----------------------------------------------------------
+SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
+-----------------------------------------------------------
+
+PREAMBLE
+The goals of the Open Font License (OFL) are to stimulate worldwide
+development of collaborative font projects, to support the font creation
+efforts of academic and linguistic communities, and to provide a free and
+open framework in which fonts may be shared and improved in partnership
+with others.
+
+The OFL allows the licensed fonts to be used, studied, modified and
+redistributed freely as long as they are not sold by themselves. The
+fonts, including any derivative works, can be bundled, embedded, 
+redistributed and/or sold with any software provided that any reserved
+names are not used by derivative works. The fonts and derivatives,
+however, cannot be released under any other type of license. The
+requirement for fonts to remain under this license does not apply
+to any document created using the fonts or their derivatives.
+
+DEFINITIONS
+"Font Software" refers to the set of files released by the Copyright
+Holder(s) under this license and clearly marked as such. This may
+include source files, build scripts and documentation.
+
+"Reserved Font Name" refers to any names specified as such after the
+copyright statement(s).
+
+"Original Version" refers to the collection of Font Software components as
+distributed by the Copyright Holder(s).
+
+"Modified Version" refers to any derivative made by adding to, deleting,
+or substituting -- in part or in whole -- any of the components of the
+Original Version, by changing formats or by porting the Font Software to a
+new environment.
+
+"Author" refers to any designer, engineer, programmer, technical
+writer or other person who contributed to the Font Software.
+
+PERMISSION & CONDITIONS
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of the Font Software, to use, study, copy, merge, embed, modify,
+redistribute, and sell modified and unmodified copies of the Font
+Software, subject to the following conditions:
+
+1) Neither the Font Software nor any of its individual components,
+in Original or Modified Versions, may be sold by itself.
+
+2) Original or Modified Versions of the Font Software may be bundled,
+redistributed and/or sold with any software, provided that each copy
+contains the above copyright notice and this license. These can be
+included either as stand-alone text files, human-readable headers or
+in the appropriate machine-readable metadata fields within text or
+binary files as long as those fields can be easily viewed by the user.
+
+3) No Modified Version of the Font Software may use the Reserved Font
+Name(s) unless explicit written permission is granted by the corresponding
+Copyright Holder. This restriction only applies to the primary font name as
+presented to the users.
+
+4) The name(s) of the Copyright Holder(s) or the Author(s) of the Font
+Software shall not be used to promote, endorse or advertise any
+Modified Version, except to acknowledge the contribution(s) of the
+Copyright Holder(s) and the Author(s) or with their explicit written
+permission.
+
+5) The Font Software, modified or unmodified, in part or in whole,
+must be distributed entirely under this license, and must not be
+distributed under any other license. The requirement for fonts to
+remain under this license does not apply to any document created
+using the Font Software.
+
+TERMINATION
+This license becomes null and void if any of the above conditions are
+not met.
+
+DISCLAIMER
+THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT
+OF COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL THE
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
+DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
+OTHER DEALINGS IN THE FONT SOFTWARE.

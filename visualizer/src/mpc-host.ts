@@ -20,7 +20,7 @@ import { FpsMeter } from './fps-meter.ts';
 import { FpsLabel, timingLabel } from './timing-label.ts';
 import { boundaryLevel, defaultFadeSpec, parseFadeFields, pickFade, planFade, type FadeSpec } from './mpc-transition-timing.ts';
 import { NERV_SCENES } from './nerv-scenes.ts';
-import { HudFeed, buildHudFrame, hudTraits, hudSetup, isSceneKind, sceneWorkerUrl } from './hud/hud-host.ts';
+import { HudFeed, buildHudFrame, hudTraits, hudSetup, isSceneKind, sceneWorkerLocation } from './hud/hud-host.ts';
 import { eligiblePresets } from './mpc-preset-eligibility.ts';
 import { PoolCache, sanitizeOrder, overlayText, type FolderPlayPlan, type PlaySource } from './mpc-folder-play.ts';
 import { fetchLocalCategories, type TaxonMap } from './avs/preset-categories.ts';
@@ -395,7 +395,7 @@ async function prepare(index: number, automatic: boolean, clockTarget?:ScenePhas
       new Promise<never>((_, reject) => { fetchTimer = window.setTimeout(() => reject(new Error('Preset fetch timed out')), 15000); }),
     ]).finally(() => clearTimeout(fetchTimer));
     if (current !== ticket) return;
-    const worker = new Worker(new URL('./'+sceneWorkerUrl(preset.kind), import.meta.url), { type: 'module' });
+    const worker = new Worker(sceneWorkerLocation(preset.kind, import.meta.url), { type: 'module' });
     const slot: Slot = { stashed:new Set(),stashPending:null,sentAt: 0, sized: '', audio: new AudioHold(), worker, generation: ++generation, index, busy: false, ready: false, bitmap: null, timeout: 0, dead: false, start:position,renderRevision:clockRevision,renderedPosition:NaN,lastAudio:latestAudio };
     slot.audio.push(latestAudio);
     prepared = slot;

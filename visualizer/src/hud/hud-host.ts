@@ -16,6 +16,24 @@ export { fetchLocalHudTitles, parseHudTitles, type HudTitleMap } from '../avs/pr
 export function sceneWorkerUrl(kind: string | undefined): string {
   return kind === 'hud' ? 'hud-render.worker.js' : kind === 'nerv' ? 'nerv-render.worker.js' : 'avs-render.worker.js';
 }
+/** Device-local choice of NERV renderer: 'show' (the show engine, src/show-render.worker.ts; default) or 'legacy' (the
+ *  Canvas2D scenes). Set localStorage `mpcaaavs.nervEngine` to 'legacy', or open the page with ?nerv=legacy, to opt out. */
+export const NERV_ENGINE_KEY = 'mpcaaavs.nervEngine';
+export function nervEngine(): 'show' | 'legacy' {
+  try {
+    const q = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('nerv') : null;
+    const v = q ?? (typeof localStorage !== 'undefined' ? localStorage.getItem(NERV_ENGINE_KEY) : null);
+    return v === 'legacy' ? 'legacy' : 'show';
+  } catch { return 'show'; }
+}
+/** URL of a single-scene preset worker. NERV presets use the show engine unless the device opted out; the show worker
+ *  reads its fonts from show-assets/ next to the page (it falls back to the Canvas2D scenes without WebGL2). */
+export function sceneWorkerLocation(kind: string | undefined, base: string): URL {
+  const show = kind === 'nerv' && nervEngine() === 'show';
+  const url = new URL('./' + (show ? 'show-render.worker.js' : sceneWorkerUrl(kind)), base);
+  if (show && typeof document !== 'undefined') url.searchParams.set('assets', new URL('show-assets/', document.baseURI).href);
+  return url;
+}
 /** Catalog metadata permits sizing before fetching the manifest. Pixel aspect is authored width/height. */
 export function hudTraits(meta: LocalHudMeta | null | undefined): SceneTraits {
   if (!meta) return {};
