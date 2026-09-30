@@ -2,7 +2,7 @@
 // Keep this handler ahead of static serving: private state is never a web asset.
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { lstat, mkdir, open, realpath, rename, unlink, link, utimes } from 'node:fs/promises';
+import { lstat, mkdir, open, readdir, realpath, rename, unlink, link, utimes } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path';
 
 const REQUEST_LIMIT = 4 * 1024 * 1024;
@@ -15,6 +15,10 @@ const defaultTiming = { enabled:false, bpm:120, offsetSeconds:0, barsPerScene:8,
 const FADE_FIELDS = [['fadeTiming',0,6],['fadeRandomSet',1,31],['fadeAnchor',0,2],['queueQuantize',0,3]];
 const STATE_NAMES = ['folders','stats'];
 const STATE_MAX_BYTES = 3670016;
+// Song-map cache (src/song-map/cache.ts): one record per track identity and map version, at most SONG_MAP_KEEP files.
+const SONG_MAP_KEY = /^[0-9a-f]{64}-v[1-9][0-9]{0,3}$/;
+const SONG_MAP_PAYLOAD_LIMIT = 3 * 1024 * 1024;
+const SONG_MAP_KEEP = 200;
 
 function requireValue(condition, message) { if (!condition) throw Error(message); }
 function settings(value) {
@@ -147,6 +151,24 @@ function stateBody(name, value) {
   }
   requireValue(Buffer.byteLength(JSON.stringify(value)) <= STATE_MAX_BYTES, 'State is too large');
   return value;
+}
+
+function songMapKey(key) { requireValue(typeof key === 'string' && SONG_MAP_KEY.test(key), 'Invalid song map key'); return key; }
+/** Shape and size only; the page decodes and validates the content and treats anything wrong as a cache miss. */
+function songMapRecord(key, value) {
+  requireValue(plain(value) && Number.isInteger(value.version) && value.version >= 1 && value.version <= 9999
+    && typeof value.analyzer === 'string' && /^[a-z0-9._-]{1,64}$/i.test(value.analyzer)
+    && typeof value.trackId === 'string' && HASH.test(value.trackId) && `${value.trackId}-v${value.version}` === key
+    && (value.encoding === 'gzip' || value.encoding === 'identity')
+    && typeof value.payload === 'string' && value.payload.length <= SONG_MAP_PAYLOAD_LIMIT && /^[A-Za-z0-9+/]*={0,2}$/.test(value.payload), 'Invalid song map record');
+  return { version:value.version, analyzer:value.analyzer, trackId:value.trackId, encoding:value.encoding, payload:value.payload };
+}
+async function pruneSongMaps(directory) {
+  const names = (await readdir(directory)).filter(name => /^[0-9a-f]{64}-v[1-9][0-9]{0,3}\.json$/.test(name));
+  if (names.length <= SONG_MAP_KEEP) return;
+  const dated = await Promise.all(names.map(async name => ({ name, time:(await lstat(join(directory, name))).mtimeMs })));
+  dated.sort((a, b) => a.time - b.time || (a.name < b.name ? -1 : 1));
+  for (const old of dated.slice(0, dated.length - SONG_MAP_KEEP)) await unlink(join(directory, old.name)).catch(() => {});
 }
 
 async function noLinks(path, allowMissing = false) {
@@ -320,6 +342,19 @@ export function createLibraryHandler(root) {
           const name = stateName(request.name), data = stateBody(name,request.data);
           await atomicJson(join(privateRoot,`${name}.json`),data);
           return {type:'state-saved',name};
+        }
+        case 'load-song-map': {
+          const key = songMapKey(request.key);
+          let data = null;
+          try { data = songMapRecord(key, await jsonFile(join(privateRoot,'song-maps',`${key}.json`),null)); } catch { data = null; }
+          return {type:'song-map-loaded',key,data};
+        }
+        case 'save-song-map': {
+          const key = songMapKey(request.key), data = songMapRecord(key,request.data), directory = join(privateRoot,'song-maps');
+          await noLinks(directory, true); await mkdir(directory, {recursive:true, mode:0o700}); await noLinks(directory);
+          await atomicJson(join(directory,`${key}.json`),data);
+          await pruneSongMaps(directory);
+          return {type:'song-map-saved',key};
         }
         default: throw Error('Unknown library request');
       }

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { createServer, request as httpRequest } from 'node:http';
-import { mkdtemp, mkdir, readFile, writeFile, rm, stat, utimes, symlink } from 'node:fs/promises';
+import { mkdtemp, mkdir, readdir, readFile, writeFile, rm, stat, utimes, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -329,6 +329,32 @@ try {
   await post({op:'save-state',name:'folders',data:before2??folderState});
   // State never becomes a static asset.
   for(const path of ['/avs%20presets/folders.json','/avs%20presets/stats.json','/avs%20presets/FOLDERS.JSON','/avs%20presets/.aaavs-private/folders.json','/avs%20presets/.aaavs-private/stats.json.writing'])same((await request('',{},path,'GET')).status,404,path);
+  // Song-map cache records (src/song-map/cache.ts): keyed by content hash and map version, shape-checked, atomic, pruned, never a static asset.
+  {
+    const trackId=hash, key=`${trackId}-v1`, record={version:1,analyzer:'aaavs-song-map-cpu-1',trackId,encoding:'gzip',payload:Buffer.from('opaque gzip bytes').toString('base64')};
+    same(await post({op:'load-song-map',key}),{type:'song-map-loaded',key,data:null},'a missing song map is null');
+    same(await post({op:'save-song-map',key,data:record}),{type:'song-map-saved',key});
+    same(await post({op:'load-song-map',key}),{type:'song-map-loaded',key,data:record},'a song map round-trips unchanged');
+    same(JSON.parse(await readFile(join(privateDir,'song-maps',`${key}.json`),'utf8')),record);
+    await assert.rejects(stat(join(privateDir,'song-maps',`${key}.json.writing`)),{code:'ENOENT'});checks++;
+    for(const bad of [undefined,null,7,'../x',`${trackId}`,`${trackId}-v0`,`${trackId}-v10000`,`${trackId.toUpperCase()}-v1`,`../${key}`,`${key}/..`,`${key}.json`]) {
+      await rejectState({op:'load-song-map',key:bad},`load-song-map key ${JSON.stringify(bad)}`);
+      await rejectState({op:'save-song-map',key:bad,data:record},`save-song-map key ${JSON.stringify(bad)}`);
+    }
+    const badRecords={other:{...record,trackId:hashB},version:{...record,version:2},encoding:{...record,encoding:'br'},analyzer:{...record,analyzer:'../x'},payload:{...record,payload:'not base64!'},
+      big:{...record,payload:'A'.repeat(3*1024*1024+4)},missing:{version:1,trackId},array:[record]};
+    for(const [label,data] of Object.entries(badRecords)) await rejectState({op:'save-song-map',key,data},`song map record ${label}`);
+    same((await post({op:'load-song-map',key})).data,record,'rejected writes leave the saved record untouched');
+    await writeFile(join(privateDir,'song-maps',`${key}.json`),'{"version":1,"payl');
+    same((await post({op:'load-song-map',key})).data,null,'a corrupt record is a cache miss, not an error');
+    for(const path of [`/avs%20presets/.aaavs-private/song-maps/${key}.json`])same((await request('',{},path,'GET')).status,404,path);
+    // Old records are pruned so the cache stays bounded.
+    const keys=Array.from({length:203},(_,i)=>`${i.toString(16).padStart(64,'0')}-v1`);
+    for(const k of keys)same((await post({op:'save-song-map',key:k,data:{...record,trackId:k.slice(0,64)}})).type,'song-map-saved');
+    const kept=(await readdir(join(privateDir,'song-maps'))).filter(name=>name.endsWith('.json'));
+    check(kept.length<=200,`song maps are pruned (${kept.length})`);
+    check(kept.includes(`${keys.at(-1)}.json`),'the newest record survives pruning');
+  }
   // Concurrent saves are serialised; the last request wins and the file is always whole.
   const rounds=await Promise.all([1,2,3,4,5].map(rev=>post({op:'save-state',name:'folders',data:{...folderState,rev}})));
   check(rounds.every(r=>r.type==='state-saved'));same((await post({op:'load-state',name:'folders'})).data.rev,5);
