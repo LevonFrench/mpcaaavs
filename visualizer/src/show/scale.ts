@@ -12,5 +12,8 @@ function readScale() {
   return Number.isFinite(s) && s >= 1 ? Math.min(s, 4) : 1;
 }
 
-/** Physical pixels per logical pixel of the output (integer 1..4, default 1). */
-export const SCALE = readScale();
+/** Physical pixels per logical pixel of the output (integer 1..4, default 1). A live binding: the preset worker
+ *  changes it (gl.ts setShowScale) between engines when the host's resolution governor settles on another size. */
+export let SCALE = readScale();
+/** AAAVS: set the scale for engines built from now on (use gl.ts setShowScale, which also rebuilds what depends on it). */
+export function setScaleValue(s: number) { SCALE = Number.isFinite(s) && s >= 1 ? Math.min(Math.round(s), 4) : 1; }

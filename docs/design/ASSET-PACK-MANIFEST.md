@@ -28,8 +28,8 @@ show-assets-private/<pack-id>/
 The hosts read packs next to the page that runs them, through the same local-file route as the preset collection
 (`avs presets/`): the MPC host maps `visualizer/` to `https://aaavs.invalid/` (WebView2 virtual host) and the standalone Player
 serves `visualizer/` (`tools/serve.mjs`). So the installed location is `visualizer/show-assets-private/<pack-id>/`; on a
-development machine, copy or link the extraction output there. `fetchPackSource(packId)` (`source.ts`) is the one production
-adapter: it builds `./show-assets-private/<pack-id>/<path>` against the page URL and reads it with the bounded reader of
+development machine, copy or link the extraction output there (the MPC host follows links; the Player's library server refuses them, so copy). `fetchPackSource(packId)` (`source.ts`) is the MPC host's production
+adapter (the Player reads through its library server, see "Host wiring"): it builds `./show-assets-private/<pack-id>/<path>` against the page URL and reads it with the bounded reader of
 `avs/local-assets.ts`. A 404 means "not installed". Hosts never duplicate pack logic; they only differ in how the folder is
 served. `memoryPackSource` (tests, generated packs) and `tools/asset-pack-fs-source.mjs` (Node tools and checks) implement the
 same `AssetPackSource` contract.
@@ -165,6 +165,63 @@ Typed lookups on `AssetPack`: `region(id)`, `regionOf(id, role)` (undefined unle
 stable order for seeded picks), `clip(id)`, `clipFrames(id)` (resolved rectangles, anchors, holds), `actorClip(actorId, verb)`,
 `font(id)`, `palette(id)`, `atlas(id)`, `image(atlas)`. Lookups of names a pack does not define (including `constructor`) return
 `undefined`.
+
+## Host wiring (per-device setting, both hosts, workers)
+
+Status: implemented in `visualizer/src/show/pack-setting.ts`, `pack-host.ts`, `pack-registry.ts`, the `show-pack` message of
+`src/show/protocol.ts` and, for the Player, `visualizer/tools/show-pack-server.mjs`; checked by `tools/check-show-pack-host.mjs`
+(CPU only: plumbing with fake sources and a real loopback HTTP server, no browser, GPU or pixels).
+
+**The setting names a pack, never a path.** The device-local setting is a pack id (`a-z0-9-`, at most 48 characters). It is read from the
+page URL (`?pack=<id>`, for testing; `?pack=off` or an empty value selects none even when a value is stored) and otherwise from localStorage
+`mpcaaavs.showPack` (the same device-local place as `mpcaaavs.nervEngine`; `writeShowPackSetting(id | null)` stores or clears it). The default is
+no pack. An invalid id fails closed (no pack, no fallback). The MPC host navigates to a fixed URL, so there the localStorage value is the way to
+set it (WebView2 dev tools: `localStorage.setItem('mpcaaavs.showPack', 'my-pack')`); no native wire field or registry value is involved.
+
+**One provider, two transports.** `src/mpc-host.ts` (shared by the MPC host and the Player) creates `window.aaavsShowPacks`, a `ShowPackProvider`
+(unless the page already published one, exactly like `window.aaavsSongMap`). The provider resolves the setting, loads the pack once through
+`loadAssetPack` and keeps the bytes it validated. Hosts differ only in the `AssetPackSource`:
+
+| Host | Source | Where the files come from |
+| --- | --- | --- |
+| MPC-HC (WebView2) | `fetchPackSource(id)` | `visualizer/show-assets-private/<id>/` beside the page, fetched same-origin through the `https://aaavs.invalid/` virtual host mapping (already git-ignored, never packaged). **No native change is needed.** |
+| Standalone Player | `httpPackSource(id)` | the loopback library server, read-only, from a directory chosen on the server side (below) |
+
+**Player server side.** `createLibraryHandler(root, { showPacks })` (`tools/standalone-library.mjs`, reader in `tools/show-pack-server.mjs`) adds
+three read-only operations to `POST /api/aaavs/library`, behind the existing same-origin loopback check and independent of the preset collection
+and its write queue:
+
+- `{op: 'list-show-packs'}` answers `{type: 'show-packs', packs: [{id}]}`: directories of the configured folder with a regular `pack.json`.
+- `{op: 'list-show-pack-files', pack}` answers `{type: 'show-pack-files', pack, files: [{path, bytes}]}`: `pack.json` and `.png` files only.
+- `{op: 'read-show-pack-file', pack, path}` answers the raw bytes (`application/octet-stream`); errors are the usual JSON `library-error`
+  (`404` with `missing: true` when the file is not there, `400` for a refusal).
+
+The directory is configured by whoever starts the server, never by the page: `node tools/serve.mjs --show-packs <dir>`, else the environment
+variable `AAAVS_SHOW_PACKS`, else the conventional `visualizer/show-assets-private/` when it exists. `<dir>/<pack-id>/pack.json` and
+`<dir>/<pack-id>/atlas/<name>.png` are the layout. Without a configured directory every operation is refused ("Show packs are not configured").
+The page can only send a pack id and a pack-relative path, both validated with the allowlist of `asset-packs/paths.ts` (the server carries a
+mirrored copy, and the check proves the two agree on a hostile corpus). Only `pack.json` (at most 512 KiB) and `.png` files (at most 8 MiB each)
+are ever served; anything else is refused, including every other file in the pack folder. Symbolic links are refused at every level below the
+configured directory, the pack directory itself must not be one, only regular files are read, the real location must equal the spelling, reads
+open with `O_NOFOLLOW` where the platform has it, sizes are checked before and on the open handle, and listings are bounded (64 packs, 256
+files). The configured directory itself may be a link the owner chose.
+
+**Workers.** The host attaches the provider to each scene worker it starts for the show engine (`show-render.worker.js` only; other workers never
+see a pack): `ShowPackProvider.attach(worker)` posts, once the pack is loaded, `{type: 'show-pack', generation, packId, manifest, atlases}`
+(`ShowPackMessage`): `pack.json` exactly as read and each atlas's PNG bytes by atlas id, as transferable copies. Nothing is posted for a pack that
+is off, absent or invalid. The worker (`src/show-render.worker.ts`, one hook line ahead of its generation gate, because a pack belongs to the
+host and not to a show generation) calls `receiveShowPack`, which re-validates the pack with `loadAssetPack` over an in-memory source (manifest,
+PNG headers against declared sizes, decode with `createImageBitmap`) and stores the result in `src/show/pack-registry.ts`. A plate reads
+`getShowPack()` and passes it to `drawSprite` / `drawGlyphs`: `null` (nothing sent, absent, invalid, cleared, or still decoding) means stand-ins,
+so plates never branch on it. A failed validation empties the registry (no half-used pack); the last message wins. `validateShowRequest` bounds
+the message: a valid id, a manifest of at most 512 KiB, at most 16 atlases of at most 8 MiB each and 32 MiB in total, plain `ArrayBuffer`s.
+
+Native additions: none. The MPC host needs no new bridge message, registry value or virtual host mapping (it already serves `visualizer/`), and the
+setting is page-local, so nothing is added to the native wire.
+
+Costs to know: the pack bytes are posted to every show worker the host starts (a scene change starts a worker), so a large pack is copied and
+decoded per scene; plates draw stand-ins until their worker has decoded it. Not done: changing the setting at run time (reload the page), and
+ImageBitmap transfer (workers decode the PNG bytes themselves).
 
 ## Procedural stand-ins
 

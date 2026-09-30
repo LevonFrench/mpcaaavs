@@ -2,7 +2,7 @@
 // Everything is generated in code (no audio files): drums, bass, pads, vocal-like chops,
 // risers and snare rolls arranged as intro/groove/break/build/drop/breakdown/outro.
 
-export type Style = 'house' | 'hiphop' | 'trance' | 'dnb';
+export type Style = 'house' | 'hiphop' | 'trance' | 'dnb' | 'waltz';
 export type Role = 'intro' | 'groove' | 'break' | 'build' | 'drop' | 'breakdown' | 'outro';
 
 export interface FixtureSpec {
@@ -14,6 +14,8 @@ export interface FixtureSpec {
   /** Silence before the first downbeat, seconds (less than one beat). */
   readonly lead: number;
   readonly swing?: number;
+  /** Beats per bar (default 4). 3 renders a waltz (style 'waltz'): kick on the downbeat, snares on beats 2 and 3, chords that change every bar. */
+  readonly beatsPerBar?: number;
   readonly arrangement: readonly { readonly role: Role; readonly bars: number }[];
   readonly seed: number;
   /** Seconds of tail after the last bar. */
@@ -22,6 +24,7 @@ export interface FixtureSpec {
 
 export interface FixtureTruth {
   readonly duration: number;
+  readonly beatsPerBar: number;
   readonly beats: number[];
   readonly downbeats: number[];
   readonly regions: { start: number; end: number; bpm: number }[];
@@ -160,16 +163,17 @@ const VOCAL_NOTES = [69, 71, 72, 74, 76];
 
 export function renderFixture(spec: FixtureSpec): Fixture {
   const rate = spec.sampleRate, bars = spec.arrangement.reduce((s, a) => s + a.bars, 0);
-  // Beat grid (4/4) through the tempo map.
+  // Beat grid (4/4 unless spec.beatsPerBar says otherwise) through the tempo map.
+  const B = spec.beatsPerBar ?? 4;
   const beatTimes: number[] = [];
   let t = spec.lead;
-  for (let beat = 0; beat <= bars * 4; beat++) {
+  for (let beat = 0; beat <= bars * B; beat++) {
     beatTimes.push(t);
-    const bar = Math.floor(beat / 4);
+    const bar = Math.floor(beat / B);
     let bpm = spec.tempo[0]!.bpm; for (const e of spec.tempo) if (bar >= e.fromBar) bpm = e.bpm;
     t += 60 / bpm;
   }
-  const duration = beatTimes[bars * 4]! + (spec.tail ?? 1.5);
+  const duration = beatTimes[bars * B]! + (spec.tail ?? 1.5);
   const total = Math.ceil(duration * rate);
   const ctx: Ctx = { rate, left: new Float32Array(total), right: new Float32Array(total), rng: new Rng(spec.seed) };
   const beatAt = (b: number) => {
@@ -181,21 +185,24 @@ export function renderFixture(spec: FixtureSpec): Fixture {
     let s = s16;
     // Swing delays the off-beat eighths (0.5 = straight).
     if (spec.swing && s16 % 4 === 2) s = s16 - 2 + 4 * spec.swing;
-    return beatAt(bar * 4 + s / 4);
+    return beatAt(bar * B + s / 4);
   };
   const truth = { kick: [] as number[], snare: [] as number[], hat: [] as number[], vocal: [] as number[] };
   const bassTruth: { start: number; end: number; midi: number }[] = [];
   const sections: { role: Role; start: number; end: number; startBar: number }[] = [];
   const style = spec.style;
-  const kickSteps = style === 'hiphop' ? [0, 7, 10] : style === 'dnb' ? [0, 10] : [0, 4, 8, 12];
-  const snareSteps = [4, 12];
+  const beatSteps = Array.from({ length: B }, (_, k) => 4 * k), offSteps = beatSteps.map(x => x + 2);
+  const kickSteps = style === 'hiphop' ? [0, 7, 10] : style === 'dnb' ? [0, 10] : style === 'waltz' ? [0] : beatSteps;
+  const snareSteps = style === 'waltz' ? [4, 8] : [4, 12];
+  const fillSteps = B === 4 ? [4, 10, 12, 14] : [4, 4 * B - 4, 4 * B - 2];
+  const offbeatHouse = style === 'house' || style === 'trance' || style === 'waltz';
   let bar0 = 0;
   const kicksOf: number[] = [];
   // First pass: drums, so bass ducking knows the kick times.
   const plan: { role: Role; bar: number; index: number; within: number; len: number }[] = [];
   for (const section of spec.arrangement) {
     for (let i = 0; i < section.bars; i++) plan.push({ role: section.role, bar: bar0 + i, index: sections.length, within: i, len: section.bars });
-    sections.push({ role: section.role, start: beatAt(bar0 * 4), end: beatAt((bar0 + section.bars) * 4), startBar: bar0 });
+    sections.push({ role: section.role, start: beatAt(bar0 * B), end: beatAt((bar0 + section.bars) * B), startBar: bar0 });
     bar0 += section.bars;
   }
   sections[0] = { ...sections[0]!, start: 0 };
@@ -205,22 +212,22 @@ export function renderFixture(spec: FixtureSpec): Fixture {
     const { role, bar, within, len } = p;
     const drums = role === 'groove' || role === 'drop' || role === 'build';
     if (drums) {
-      const steps = role === 'build' ? [0, 4, 8, 12] : kickSteps;
+      const steps = role === 'build' ? beatSteps : kickSteps;
       for (const s of steps) { const at = step(bar, s); kick(ctx, at, role === 'drop' ? .9 : .8); truth.kick.push(at); kicksOf.push(at); }
     }
     if (role === 'groove' || role === 'drop') {
       const fill = role === 'groove' && within === len - 1;
-      for (const s of fill ? [4, 10, 12, 14] : snareSteps) { const at = step(bar, s); snare(ctx, at, .5, style === 'house' || style === 'trance'); truth.snare.push(at); }
+      for (const s of fill ? fillSteps : snareSteps) { const at = step(bar, s); snare(ctx, at, .5, offbeatHouse); truth.snare.push(at); }
     }
     if (role === 'build') {
       const sixteenth = within >= len / 2, amp = .18 + .3 * within / len;
-      for (let s = 0; s < 16; s += sixteenth ? 1 : 2) { const at = step(bar, s); snare(ctx, at, amp); truth.snare.push(at); }
+      for (let s = 0; s < 4 * B; s += sixteenth ? 1 : 2) { const at = step(bar, s); snare(ctx, at, amp); truth.snare.push(at); }
       if (within % 2 === 1) for (const s of [2, 10]) { const at = step(bar, s); vocal(ctx, at, VOCAL_NOTES[Math.floor((vr.next() + 1) * 2.5)]!, .22); truth.vocal.push(at); }
-      if (within === 0) riser(ctx, step(bar, 0), beatAt((bar + len) * 4) - step(bar, 0), .12);
+      if (within === 0) riser(ctx, step(bar, 0), beatAt((bar + len) * B) - step(bar, 0), .12);
     }
     const hats = role === 'groove' || role === 'drop' || (role === 'outro' && within < len / 2);
     if (hats) {
-      if (style === 'house' || style === 'trance') for (const s of [2, 6, 10, 14]) { const at = step(bar, s); hat(ctx, at, .22, true); truth.hat.push(at); }
+      if (offbeatHouse) for (const s of offSteps) { const at = step(bar, s); hat(ctx, at, .22, true); truth.hat.push(at); }
       else for (let s = 0; s < 16; s += 2) { if (s === 4 || s === 12) continue; const at = step(bar, s); hat(ctx, at, .2); if (!kickSteps.includes(s)) truth.hat.push(at); }
     }
     if (role === 'drop' && within === 0) { const at = step(bar, 0); crash(ctx, at, .18); }
@@ -230,45 +237,45 @@ export function renderFixture(spec: FixtureSpec): Fixture {
   for (const p of plan) {
     const { role, bar } = p;
     const chord = CHORDS[bar % 4]!, root = BASS_ROOTS[bar % 4]!;
-    const barStart = beatAt(bar * 4), barEnd = beatAt(bar * 4 + 4);
-    if (role !== 'drop' || style === 'hiphop' || style === 'dnb') pad(ctx, barStart, barEnd - barStart, chord, role === 'groove' || role === 'drop' ? .07 : .1);
+    const barStart = beatAt(bar * B), barEnd = beatAt(bar * B + B);
+    if (role !== 'drop' || style === 'hiphop' || style === 'dnb' || style === 'waltz') pad(ctx, barStart, barEnd - barStart, chord, role === 'groove' || role === 'drop' ? .07 : .1);
     const bass = role === 'groove' || role === 'drop' || role === 'break';
     if (bass) {
       const amp = role === 'drop' ? .5 : .4;
       if (style === 'house' || style === 'trance') {
-        const steps = style === 'house' ? [2, 6, 10, 14] : [1, 2, 3, 5, 6, 7, 9, 10, 11, 13, 14, 15];
-        const noteLen = style === 'house' ? beatAt(bar * 4 + .45) - barStart : beatAt(bar * 4 + .2) - barStart;
+        const steps = style === 'house' ? offSteps : [1, 2, 3, 5, 6, 7, 9, 10, 11, 13, 14, 15];
+        const noteLen = style === 'house' ? beatAt(bar * B + .45) - barStart : beatAt(bar * B + .2) - barStart;
         for (const s of steps) { const at = step(bar, s); bassNote(ctx, at, noteLen, root, amp, role === 'break' ? null : kicksOf); bassTruth.push({ start: at, end: at + noteLen, midi: root }); }
       } else {
-        const halves = style === 'hiphop' ? [[0, 2], [2, 4]] : [[0, 4]];
+        const halves = style === 'hiphop' ? [[0, 2], [2, 4]] : style === 'waltz' ? [[0, 2]] : [[0, 4]];
         for (const [a, b] of halves) {
-          const s0 = beatAt(bar * 4 + a!), s1 = beatAt(bar * 4 + b!) - .01;
+          const s0 = beatAt(bar * B + a!), s1 = beatAt(bar * B + b!) - .01;
           bassNote(ctx, s0, s1 - s0, root, amp, null, style === 'dnb'); bassTruth.push({ start: s0, end: s1, midi: root });
         }
       }
     }
-    if (role === 'drop') for (const s of [2, 6, 10, 14]) lead(ctx, step(bar, s), .18, chord, .12);
+    if (role === 'drop') for (const s of offSteps) lead(ctx, step(bar, s), .18, chord, .12);
   }
   // Truth grid: every beat of the (extended) grid inside the file.
   const beats: number[] = [], downbeats: number[] = [];
   const period0 = beatTimes[1]! - beatTimes[0]!;
-  for (let k = -8; k < 0; k++) { const tt = beatTimes[0]! + k * period0; if (tt >= 0) { beats.push(tt); if (((k % 4) + 4) % 4 === 0) downbeats.push(tt); } }
+  for (let k = -8; k < 0; k++) { const tt = beatTimes[0]! + k * period0; if (tt >= 0) { beats.push(tt); if (((k % B) + B) % B === 0) downbeats.push(tt); } }
   const lastPeriod = beatTimes[beatTimes.length - 1]! - beatTimes[beatTimes.length - 2]!;
   for (let k = 0; ; k++) {
     const tt = k < beatTimes.length ? beatTimes[k]! : beatTimes[beatTimes.length - 1]! + (k - beatTimes.length + 1) * lastPeriod;
     if (tt > duration) break;
-    beats.push(tt); if (k % 4 === 0) downbeats.push(tt);
+    beats.push(tt); if (k % B === 0) downbeats.push(tt);
   }
-  const regions = spec.tempo.map((e, i) => ({ start: i === 0 ? 0 : beatAt(e.fromBar * 4), end: i + 1 < spec.tempo.length ? beatAt(spec.tempo[i + 1]!.fromBar * 4) : duration, bpm: e.bpm }));
+  const regions = spec.tempo.map((e, i) => ({ start: i === 0 ? 0 : beatAt(e.fromBar * B), end: i + 1 < spec.tempo.length ? beatAt(spec.tempo[i + 1]!.fromBar * B) : duration, bpm: e.bpm }));
   for (const list of Object.values(truth)) list.sort((x, y) => x - y);
   // Keep headroom: peak-normalise to 0.9.
   let peak = 0; for (let i = 0; i < total; i++) peak = Math.max(peak, Math.abs(ctx.left[i]!), Math.abs(ctx.right[i]!));
   const g = peak > 0 ? .9 / peak : 1; for (let i = 0; i < total; i++) { ctx.left[i]! *= g; ctx.right[i]! *= g; }
   const barLength = (tt: number) => {
     let bpm = spec.tempo[0]!.bpm; for (const r of regions) if (tt >= r.start) bpm = r.bpm;
-    return 240 / bpm;
+    return 60 * B / bpm;
   };
-  return { spec, left: ctx.left, right: ctx.right, truth: { duration, beats, downbeats, regions, sections, onsets: truth, bass: bassTruth, barLength } };
+  return { spec, left: ctx.left, right: ctx.right, truth: { duration, beatsPerBar: B, beats, downbeats, regions, sections, onsets: truth, bass: bassTruth, barLength } };
 }
 
 export const FIXTURES: readonly FixtureSpec[] = [
@@ -276,6 +283,8 @@ export const FIXTURES: readonly FixtureSpec[] = [
   { name: 'hiphop-90-swing', style: 'hiphop', sampleRate: 44100, tempo: [{ fromBar: 0, bpm: 90 }], lead: .21, swing: .62, arrangement: STANDARD_ARRANGEMENT, seed: 23 },
   { name: 'trance-133.33', style: 'trance', sampleRate: 44100, tempo: [{ fromBar: 0, bpm: 400 / 3 }], lead: .05, arrangement: STANDARD_ARRANGEMENT, seed: 37 },
   { name: 'dnb-174', style: 'dnb', sampleRate: 48000, tempo: [{ fromBar: 0, bpm: 174 }], lead: .12, arrangement: STANDARD_ARRANGEMENT, seed: 41 },
+  // 3/4: a waltz. The grid, the bars and the sections must come out in threes (beatsPerBar 3), at the same accuracy as the 4/4 fixtures.
+  { name: 'waltz-126', style: 'waltz', sampleRate: 44100, tempo: [{ fromBar: 0, bpm: 126 }], beatsPerBar: 3, lead: .29, arrangement: STANDARD_ARRANGEMENT, seed: 61 },
   { name: 'house-120-to-128', style: 'house', sampleRate: 44100, tempo: [{ fromBar: 0, bpm: 120 }, { fromBar: 40, bpm: 128 }], lead: 0, arrangement: STANDARD_ARRANGEMENT, seed: 53 },
 ];
 

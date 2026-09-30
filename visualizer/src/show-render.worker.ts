@@ -11,7 +11,7 @@
  * Dialects: src/show/protocol.ts (show-init / show-render). */
 import { Engine, type TimelineEntry } from './show/engine.ts';
 import { AudioData } from './show/audio.ts';
-import { PW, PH, SCALE } from './show/gl.ts';
+import { PW, PH, SCALE, setShowScale } from './show/gl.ts';
 import { setAssetBase } from './show/canvas.ts';
 import { planShow, type PlannedPlate } from './show/plan.ts';
 import { validateShowRequest, type ShowAudioMessage, type ShowInitMessage, type ShowPlanEntry, type ShowRenderMessage } from './show/protocol.ts';
@@ -22,6 +22,7 @@ import type { AvsWorkerRequest, AvsWorkerRenderMessage, NervPlaybackFrame } from
 import { parseNervPreset } from './nerv-preset.ts';
 import { createNervLegacyRenderer, drawNervTransition, validateNervClock, NERV_SILENCE, type NervTransitionCache } from './nerv-legacy-render.ts';
 import { HARD_MAX_EDGE, HARD_MAX_PIXELS, fitWithin } from './render-resolution.ts';
+import { ShowScaleSwitch } from './show/scale-switch.ts';
 import { NERV_SCENE_CLASSES, NERV_SHOW, type NervPlateId } from './shows/nerv/index.ts';
 import { SHOW_DEFS, isShowId, type ShowId } from './shows/defs.ts';
 import { SHOW_SCENES } from './shows/scenes.ts';
@@ -29,6 +30,7 @@ import { validateSongMap } from './song-map/validate.ts';
 import { synthesizeWave } from './song-map/synth-wave.ts';
 import { PERF, perfAdd, perfBegin, perfConfigure, perfEnd, perfNow, perfTake } from './perf-worker.ts';
 import { epochNow, parsePerfMode, type PerfMode } from './perf-trace.ts';
+import { receiveShowPack } from './show/pack-registry.ts';
 
 const scope = self as unknown as {
   onmessage: ((event: MessageEvent<unknown>) => void) | null;
@@ -189,10 +191,29 @@ async function presetLoad(m: Extract<AvsWorkerRequest, { type: 'load' }>) {
   }
 }
 
+// GPU frame pacing: at most one frame in flight. Without it, when the GPU is slower than the host's requests (4K on a
+// slow GPU, SwiftShader), submitted frames pile up in the command queue: latency grows without bound and the next
+// synchronous GL call (a resize, a readback) waits for the whole backlog.
+let inFlight: WebGLSync | null = null;
+async function waitForGpu() {
+  const gl = presetEngine?.renderer.getContext() as WebGL2RenderingContext | undefined;
+  if (!gl || !inFlight) return;
+  while (gl.clientWaitSync(inFlight, 0, 0) === gl.TIMEOUT_EXPIRED) await new Promise((r) => setTimeout(r, 1));
+  gl.deleteSync(inFlight); inFlight = null;
+}
+function fenceFrame() {
+  const gl = presetEngine?.renderer.getContext() as WebGL2RenderingContext | undefined;
+  if (!gl) return;
+  if (inFlight) gl.deleteSync(inFlight);
+  inFlight = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+  gl.flush();
+}
+
 async function presetRender(m: AvsWorkerRenderMessage) {
   if (legacy) { legacy(m); return; }
   if (m.generation !== presetGen || !presetPlate || !presetEngine) return;
   try {
+    await waitForGpu(); // the previous frame has finished on the GPU (the host measures this wait as frame time)
     perfFrameStart(m.perf);
     const started = performance.now();
     if (!Number.isFinite(m.width) || !Number.isFinite(m.height)) throw Error('Invalid scene size');
@@ -227,25 +248,54 @@ async function presetRender(m: AvsWorkerRenderMessage) {
       renderPlate(w.current.key, clock.time);
       drawFitted(out, width, height);
     }
+    fenceFrame();
     const b0 = PERF.on ? perfNow() : 0;
     const bitmap = out.transferToImageBitmap(), elapsed = performance.now() - started;
     if (PERF.on) { perfAdd('frame.bitmap', perfNow() - b0); perfAdd('frame.total', elapsed); }
     const perf = perfTake(), r0 = perf ? perfNow() : 0;
-    post({ type: 'frame', generation: presetGen, sequence: m.sequence, bitmap, pcm: m.pcm, width, height, unsupported: 0, renderMs: elapsed > 0 ? elapsed : 0, ...(perf ? { perf } : {}) }, [bitmap, m.pcm]);
+    post({ type: 'frame', generation: presetGen, sequence: m.sequence, bitmap, pcm: m.pcm, width, height, unsupported: 0, renderMs: elapsed > 0 ? elapsed : 0, engineScale: SCALE, ...(perf ? { perf } : {}) }, [bitmap, m.pcm]);
     if (perf) perfAdd('frame.reply', perfNow() - r0);
   } catch (error) {
     post({ type: 'error', generation: m.generation, message: String(error), fatal: true });
   }
 }
 
+// ------------------------------------------------------------------ output scale (show/scale-switch.ts)
+// The engine renders at the scale the host's resolution governor needs. When the governor settles on a size that needs
+// another scale for SWITCH_FRAMES requests, the engine is disposed and rebuilt in this worker at the new scale (one slow
+// frame while its plate is rebuilt; never two WebGL contexts at once). Show-dialect workers keep the scale of their URL.
+const scaleSwitch = new ShowScaleSwitch(SCALE);
+
+function switchScale(scale: number) {
+  const renderer = presetEngine?.renderer;
+  try { presetEngine?.release(); } catch { /* best effort: the targets are unreachable either way */ }
+  presetEngine = null; presetReady = false; presetKey = ''; clocks.clear();
+  setShowScale(scale);
+  // the same canvas and WebGL context, resized: the new engine's targets, passes and plates are built at the new scale
+  presetEngine = new Engine(canvas as unknown as HTMLCanvasElement, () => presetEntries, renderer);
+  scaleSwitch.settle(SCALE);
+}
+
+/** One preset-dialect message; renders first let the governor's size choose the engine scale. */
+async function presetMessage(m: AvsWorkerRequest) {
+  if (m.type === 'load') { scaleSwitch.settle(SCALE); await presetLoad(m); return; }
+  if (m.type === 'render') {
+    if (!legacy && presetEngine && m.generation === presetGen) {
+      const want = scaleSwitch.observe(m.width, m.height);
+      if (want !== null) { await waitForGpu(); switchScale(want); }
+    }
+    await presetRender(m);
+    return;
+  }
+  legacy?.(m);
+}
+
 scope.onmessage = ({ data }) => {
   const type = (data as { type?: unknown } | null)?.type;
   if (type === 'load' || type === 'render' || type === 'clear' || type === 'controls') {
-    queue = queue.then(async () => {
-      const m = data as AvsWorkerRequest;
-      if (m.type === 'load') await presetLoad(m);
-      else if (m.type === 'render') await presetRender(m);
-      else legacy?.(m);
+    // one failing message must never reject the queue: every later message would be skipped and the host would wait forever
+    queue = queue.then(() => presetMessage(data as AvsWorkerRequest)).catch((error) => {
+      post({ type: 'error', generation: (data as { generation?: number }).generation ?? -1, message: String((error as Error)?.stack ?? error), fatal: true });
     });
     return;
   }
@@ -254,6 +304,7 @@ scope.onmessage = ({ data }) => {
     try {
       const m = validateShowRequest(data);
       gen = m.generation;
+      if (m.type === 'show-pack') { debug(`asset pack ${(await receiveShowPack(m)).status}`); return; } // host-wide, never dropped by a show generation
       if (m.type === 'show-init') { generation = m.generation; await init(m); return; }
       if (m.generation !== generation) return;
       if (m.type === 'show-audio') { pushAudio(m); return; }

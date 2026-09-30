@@ -11,6 +11,9 @@ export interface MultiViewWorkerHost {
   bitmaps(hash: string): Promise<readonly { name: string; bytes: ArrayBuffer }[]>;
   size(index: number, pane: number): { width: number; height: number };
   worker(url: string): Worker;
+  /** Optional: the worker for a scene kind at a pane size (the host's choice of renderer, e.g. NERV lanes on the show
+   *  engine at the scale the pane needs). Without it, `worker(sceneWorkerUrl(kind))`. */
+  sceneWorker?(kind: string | undefined, size: { width: number; height: number }): Worker;
   /** Reuse the host's PCM, shared HudFeed, reduced motion, track duration and scene-frame construction. */
   frame(input: MultiViewRenderFrame, index: number, audio: AvsAudioFrame): Omit<AvsWorkerRenderMessage, 'type' | 'generation' | 'sequence' | 'width' | 'height'>;
   initialAudio(): AvsAudioFrame;
@@ -39,7 +42,8 @@ export async function createMultiViewWorker(host: MultiViewWorkerHost, index: nu
     });
     clearTimeout(timer); rejectReady = null;
     if (dead || signal.aborted) throw Error('Pane load canceled');
-    worker = host.worker(sceneWorkerUrl(preset.kind));
+    const size = host.size(index, pane);
+    worker = host.sceneWorker ? host.sceneWorker(preset.kind, size) : host.worker(sceneWorkerUrl(preset.kind));
     const ready = new Promise<void>((resolve, reject) => {
       rejectReady = reject; timer = setTimeout(() => reject(Error('Pane worker initialization timed out')), 15000);
       worker!.onerror = event => { const error = Error(event.message || 'Pane worker failed'); rejectReady?.(error); waiting?.reject(error); dispose(); };
@@ -54,7 +58,7 @@ export async function createMultiViewWorker(host: MultiViewWorkerHost, index: nu
         }
       };
     });
-    const size = host.size(index, pane), copy = bytes.slice();
+    const copy = bytes.slice();
     const load: AvsWorkerRequest = { type: 'load', generation: gen, preset: copy.buffer as ArrayBuffer, bitmaps, ...size, gpuLane: 'exact' };
     worker.postMessage(load, [load.preset]); await ready;
     return {

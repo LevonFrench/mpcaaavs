@@ -15,12 +15,13 @@ const bundle = await build({
       export { liveSongMap } from './src/show/live.ts';
       export { songToHome } from './src/show/bar-map.ts';
       export { NERV_SHOW, NERV_PLATE_IDS } from './src/shows/nerv/show-def.ts';
-      export { nervEngine, sceneWorkerLocation, NERV_ENGINE_KEY } from './src/hud/hud-host.ts';`,
+      export { nervEngine, sceneWorkerLocation, NERV_ENGINE_KEY } from './src/hud/hud-host.ts';
+      export { showScaleFor, ShowScaleSwitch, SWITCH_FRAMES } from './src/show/scale-switch.ts';`,
     resolveDir: VIS, loader: 'ts',
   },
   bundle: true, format: 'esm', write: false, logLevel: 'error', platform: 'neutral',
 });
-const { presetWindow, liveSongMap, songToHome, NERV_SHOW, NERV_PLATE_IDS, nervEngine, sceneWorkerLocation, NERV_ENGINE_KEY } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`);
+const { presetWindow, liveSongMap, songToHome, NERV_SHOW, NERV_PLATE_IDS, nervEngine, sceneWorkerLocation, NERV_ENGINE_KEY, showScaleFor, ShowScaleSwitch, SWITCH_FRAMES } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`);
 
 let n = 0;
 const ok = (c, m) => { n++; assert.ok(c, m); };
@@ -117,6 +118,29 @@ for (const plate of NERV_PLATE_IDS) {
   eq(sceneWorkerLocation(undefined, 'https://aaavs.invalid/visualizer/dist/mpc-host.js').pathname, '/visualizer/dist/avs-render.worker.js', 'worker URL: AVS unchanged');
   globalThis.localStorage = { getItem: () => 'legacy' };
   eq(sceneWorkerLocation('nerv', 'https://aaavs.invalid/visualizer/dist/mpc-host.js').pathname, '/visualizer/dist/nerv-render.worker.js', 'worker URL: legacy NERV when opted out');
+}
+
+// output scale: the governor's render size picks the engine scale; changes are debounced
+{
+  eq([showScaleFor(1920, 1080), showScaleFor(1280, 720), showScaleFor(2400, 1350), showScaleFor(2560, 1440), showScaleFor(3840, 2160), showScaleFor(1080, 1920), showScaleFor(0, 0)], [1, 1, 1, 2, 2, 2, 1], 'scale per render size');
+  const sw = new ShowScaleSwitch(1);
+  for (let i = 1; i < SWITCH_FRAMES; i++) eq(sw.observe(3840, 2160), null, `switch waits (${i})`);
+  eq(sw.observe(3840, 2160), 2, 'switch after SWITCH_FRAMES requests');
+  sw.settle(2);
+  eq(sw.observe(3840, 2160), null, 'no switch at the current scale');
+  // a governor probing another tier for a few frames never restarts the renderer
+  for (let k = 0; k < 5; k++) { for (let i = 0; i < SWITCH_FRAMES - 1; i++) eq(sw.observe(1920, 1080), null, 'probe'); eq(sw.observe(3840, 2160), null, 'back before the switch'); }
+  for (let i = 1; i < SWITCH_FRAMES; i++) sw.observe(1920, 1080);
+  eq(sw.observe(1920, 1080), 1, 'a settled step down switches back');
+  sw.settle(2);
+  eq(sw.observe(1920, 1080), null, 'an abandoned switch restarts the count');
+  globalThis.localStorage = { getItem: () => null };
+  globalThis.document = { baseURI: 'https://aaavs.invalid/visualizer/mpc.html' };
+  const base = 'https://aaavs.invalid/visualizer/dist/mpc-host.js';
+  eq(sceneWorkerLocation('nerv', base, { width: 3840, height: 2160 }).searchParams.get('scale'), '2', 'worker URL: native 4K starts at scale 2');
+  eq(sceneWorkerLocation('nerv', base, { width: 1920, height: 1080 }).searchParams.get('scale'), '1', 'worker URL: 1080p starts at scale 1');
+  eq(sceneWorkerLocation('nerv', base).searchParams.get('scale'), null, 'worker URL: no size, the worker default');
+  eq(sceneWorkerLocation('hud', base, { width: 3840, height: 2160 }).search, '', 'worker URL: other kinds carry no scale');
 }
 
 console.log(`Show preset CPU checks PASS (${n} assertions): scene windows and bar maps for all 16 plates, one analysis window per scene, legacy tempo, held scenes, crossfade entries, engine choice and worker URLs.`);

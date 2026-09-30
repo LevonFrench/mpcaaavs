@@ -18,6 +18,8 @@ export interface MultiViewSessionHost {
   presets(preset: LocalAvsPreset): Promise<Uint8Array>;
   bitmaps(hash: string): Promise<readonly { name: string; bytes: ArrayBuffer }[]>;
   worker(url: string): Worker;
+  /** Optional renderer choice per scene kind and pane size (see MultiViewWorkerHost.sceneWorker). */
+  sceneWorker?(kind: string | undefined, size: { width: number; height: number }): Worker;
   view(): { width: number; height: number; dpr: number };
   display(): DisplayPrefs;
   audio(): AvsAudioFrame;
@@ -170,6 +172,7 @@ export class MultiViewSession {
     this.runtime = new MultiViewRuntime(this.clock!, {
       create: (index, pane, signal) => createMultiViewWorker({ catalog: this.host.catalog(), fetchPreset: p => this.host.presets(p), bitmaps: hash => this.host.bitmaps(hash), size: (index, pane) => this.size(index, pane).render,
         worker: url => this.host.worker(url), initialAudio: () => this.host.audio(),
+        ...(this.host.sceneWorker ? { sceneWorker: (kind: string | undefined, size: { width: number; height: number }) => this.host.sceneWorker!(kind, size) } : {}),
         frame: (input, index, audio) => {
           const phase = input.lane.phase, clock = input.lane.clock, t = input.time, p = this.host.catalog()[index]!, bpm = clock.grid.bpmAt(t), seed = hash32(this.plan.timing.seed ^ Math.imul(input.lane.pane + 1, 0x9e3779b1)), localTime = Math.max(0, t - phase.start), beat = Math.max(0, clock.grid.beatAt(t));
           return { pcm: this.host.pcm().slice().buffer as ArrayBuffer, audio,

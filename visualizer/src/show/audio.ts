@@ -6,6 +6,7 @@
 // upstream's, method for method, so the plates call it unchanged and never know which analyzer (or the
 // live fallback, see live.ts) produced the data. `withBarMap()` gives a plate a view whose bar grid is
 // re-indexed onto its home bars (see bar-map.ts); everything else is shared.
+import { beatsPerBarOf } from '../song-map/meter.ts';
 import type { SectionRole, SongMapBinary, SongMapJSON, SongMapSection } from '../song-map/types.ts';
 import { type BarMap, isIdentity, mapBarToTime, mapTimeToBar } from './bar-map.ts';
 
@@ -39,6 +40,8 @@ export class AudioData {
   bpm: number;
   beats: number[];
   downbeats: number[];
+  /** Beats between two downbeats (the map's `beatsPerBar`, 4 when the map does not say). */
+  readonly beatsPerBar: number;
   sections: SongMapSection[];
   /** Frame rate of the envelopes, bass pitch and spectrogram. */
   fps: number;
@@ -67,6 +70,7 @@ export class AudioData {
     this.bpm = j.bpm;
     this.beats = j.beats;
     this.downbeats = j.downbeats;
+    this.beatsPerBar = beatsPerBarOf(j.beatsPerBar);
     this.sections = j.sections;
     this.fps = j.fps || 100;
     // envelopes may be nested under `features` or top-level arrays (upstream's audio.json)
@@ -103,7 +107,7 @@ export class AudioData {
   /** Continuous bar index on the song's own downbeat grid (not re-indexed). */
   songBarAt(t: number): number {
     const d = this.songDownbeats();
-    if (d.length < 2) return this.beatAt(t) / 4;
+    if (d.length < 2) return this.beatAt(t) / this.beatsPerBar;
     if (t <= d[0]!) return (t - d[0]!) / (d[1]! - d[0]!);
     if (t >= d[d.length - 1]!) {
       const p = d[d.length - 1]! - d[d.length - 2]!;

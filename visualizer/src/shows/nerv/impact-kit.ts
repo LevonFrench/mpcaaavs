@@ -139,7 +139,7 @@ export function wallChrome(c: CanvasRenderingContext2D, s: S, reveal: number) {
   const tc = `${pad2(mm)}:${ss.toFixed(2).padStart(5, '0')}`;
   const w7 = segWidth(tc, 30, 3.6);
   sevenSeg(c, tc, X1 - w7, 40, 30, col, C('orange', 0.08), { thick: 3.6 });
-  const b = songBar(au, t), bi = Math.floor(b), beat = Math.floor((b - bi) * 4) + 1;
+  const b = songBar(au, t), bi = Math.floor(b), beat = Math.floor((b - bi) * au.beatsPerBar) + 1;
   c.font = font(F.mono(600), 12); c.letterSpacing = '2.4px'; c.textAlign = 'right';
   c.fillText(`BAR ${String(bi).padStart(3, '0')}  BEAT ${beat}  133.33 BPM`, X1 - w7 - 24, 58);
   c.font = jp(13, 600, false); c.letterSpacing = '0px';

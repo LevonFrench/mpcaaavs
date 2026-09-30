@@ -7,6 +7,9 @@
 //    NervPlaybackFrame and an AvsAudioFrame), so the MPC host and the shared Player can swap the legacy
 //    Canvas2D NERV worker for this engine without changing their clocks (see src/show-host.ts).
 import type { SongMapJSON } from '../song-map/types.ts';
+import { ASSET_PACK_LIMITS } from '../asset-packs/manifest.ts';
+import { ASSET_PACK_TOTAL_BYTES } from '../asset-packs/loader.ts';
+import { isPackId } from '../asset-packs/paths.ts';
 
 export interface ShowParams {
   /** Loaded track, shown on the title and end cards. */
@@ -74,7 +77,22 @@ export interface ShowAudioMessage {
   readonly beatLevel: number;
 }
 
-export type ShowWorkerRequest = ShowInitMessage | ShowRenderMessage | ShowAudioMessage;
+/**
+ * The private asset pack plates may draw (docs/design/ASSET-PACK-MANIFEST.md), sent by the host to a worker at any time (the worker
+ * stores it in src/show/pack-registry.ts). `generation` is only the host's pack revision (any integer >= 0), not a show generation:
+ * a pack message is never dropped for belonging to an old show. `packId: null` clears the pack. Otherwise `manifest` is `pack.json`
+ * exactly as read and `atlases` maps each atlas id of the manifest to its PNG bytes; both are transferable copies. The worker validates
+ * everything again with the asset-pack loader, so a bad pack leaves plates on their procedural stand-ins.
+ */
+export interface ShowPackMessage {
+  readonly type: 'show-pack';
+  readonly generation: number;
+  readonly packId: string | null;
+  readonly manifest?: ArrayBuffer;
+  readonly atlases?: Readonly<Record<string, ArrayBuffer>>;
+}
+
+export type ShowWorkerRequest = ShowInitMessage | ShowRenderMessage | ShowAudioMessage | ShowPackMessage;
 
 export interface ShowPlanEntry { readonly id: string; readonly role: string; readonly start: number; readonly end: number; readonly startBar: number; readonly endBar: number }
 
@@ -151,5 +169,30 @@ export function validateShowRequest(m: unknown): ShowWorkerRequest {
     if (typeof x.beat !== 'boolean' || !finite(x.beatLevel) || (x.beatLevel as number) < 0) throw new Error('Invalid show audio beat');
     return m as ShowAudioMessage;
   }
+  if (x.type === 'show-pack') return validateShowPack(x);
   throw new Error('Invalid show message type');
+}
+
+const ATLAS_ID = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+/** Shape and size checks of a `show-pack` message (content is validated by the asset-pack loader in the worker). */
+function validateShowPack(x: Record<string, unknown>): ShowPackMessage {
+  if (x.packId === null) {
+    if (x.manifest !== undefined || x.atlases !== undefined) throw new Error('Invalid show pack: a cleared pack carries no data');
+    return x as unknown as ShowPackMessage;
+  }
+  if (!isPackId(x.packId)) throw new Error('Invalid show pack id');
+  if (!(x.manifest instanceof ArrayBuffer) || x.manifest.byteLength < 1 || x.manifest.byteLength > ASSET_PACK_LIMITS.manifestBytes) throw new Error('Invalid show pack manifest');
+  const atlases = x.atlases;
+  if (!atlases || typeof atlases !== 'object' || Array.isArray(atlases)) throw new Error('Invalid show pack atlases');
+  const proto = Object.getPrototypeOf(atlases);
+  if (proto !== Object.prototype && proto !== null) throw new Error('Invalid show pack atlases');
+  const entries = Object.entries(atlases);
+  if (entries.length > ASSET_PACK_LIMITS.atlases) throw new Error('Invalid show pack atlases: too many');
+  let total = 0;
+  for (const [id, bytes] of entries) {
+    if (!ATLAS_ID.test(id) || !(bytes instanceof ArrayBuffer) || bytes.byteLength < 1 || bytes.byteLength > ASSET_PACK_LIMITS.atlasBytes) throw new Error('Invalid show pack atlas');
+    total += bytes.byteLength;
+  }
+  if (total > ASSET_PACK_TOTAL_BYTES) throw new Error('Invalid show pack atlases: over the pack budget');
+  return x as unknown as ShowPackMessage;
 }

@@ -11,6 +11,7 @@
 // (a new scene, a new grid, a new previous plate, or playback running past the scene end by another bar).
 import type { NervPlaybackFrame } from '../avs-worker-protocol.ts';
 import { compileClockGrid } from '../mpc-beat-grid.ts';
+import { beatsPerBarOf } from '../song-map/meter.ts';
 import { NERV_SHOW, type NervPlateId } from '../shows/nerv/show-def.ts';
 import type { BarMap } from './bar-map.ts';
 import { liveSongMap, type LiveClock } from './live.ts';
@@ -52,7 +53,8 @@ export function presetWindow(clock: NervPlaybackFrame, plate: NervPlateId): Pres
   const grid = compileClockGrid(clock.grid ?? null);
   const start = clock.sceneStart ?? clock.time - clock.localTime;
   const bpm = clampBpm(grid ? grid.bpmAt(start) : clock.bpm);
-  const bar = 240 / bpm;
+  const perBar = grid && clock.grid ? beatsPerBarOf(clock.grid.beatsPerBar) : 4; // the host clock grid's meter (song-map/meter.ts)
+  const bar = (perBar * 60) / bpm;
   // the beat phase: the saved grid's offset, else the legacy derivation (beats counted from the scene start)
   const firstBeat = grid && clock.grid ? clock.grid.offset : start;
   const home = NERV_SHOW.plates[plate]!.home, homeBars = home[1] - home[0];
@@ -76,12 +78,12 @@ export function presetWindow(clock: NervPlaybackFrame, plate: NervPlateId): Pres
 
   const origin = Math.max(0, Math.min(start, prevId ? pStart : start) - 2 * bar);
   const duration = Math.max(end, prevId ? pEntryEnd : end) + 4 * bar;
-  const live: LiveClock = { duration, bpm, firstBeat, origin, maxSeconds: duration - origin };
+  const live: LiveClock = { duration, bpm, firstBeat, origin, maxSeconds: duration - origin, beatsPerBar: perBar };
   const d = liveSongMap(live).downbeats;
   const current = entry(plate, start, end, d, 'cur');
   const prev = prevId ? entry(prevId, pStart, pEnd, d, 'prev') : null;
   // the previous entry's window is its scene; its timeline entry stays on screen through the fade
   const previous = prev ? { ...prev, end: pEntryEnd } : null;
-  const key = [current.key, previous?.key ?? '-', fix(bpm), fix(firstBeat), fix(origin), fix(duration)].join('|');
+  const key = [current.key, previous?.key ?? '-', fix(bpm), fix(firstBeat), fix(origin), fix(duration), perBar].join('|');
   return { key, live, current, previous, bpm };
 }

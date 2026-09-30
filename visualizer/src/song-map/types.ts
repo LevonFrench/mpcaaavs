@@ -12,6 +12,9 @@ export interface SongMapJSON {
   fps: number;
   beats: number[];
   downbeats: number[];
+  /** Beats between two downbeats (the meter: 3 for a waltz). Optional and additive: absent means 4, and every reader must work without it.
+   *  Only integers from 2 to 12 are honoured (src/song-map/meter.ts `beatsPerBarOf`). `confidence.downbeat` covers the bar phase, not the meter. */
+  beatsPerBar?: number;
   bar0?: number;
   sections: SongMapSection[];
   features: Record<SongMapFeature, number[]>;
@@ -22,7 +25,8 @@ export interface SongMapJSON {
   spectrum?: { frames: number; mel: number; chroma: number; fmin: number; fmax: number };
   /** Interleaved peak-normalized stereo in SongMapBinary.wave. */
   wave?: { rate: number; channels: number; frames: number };
-  confidence: { tempo: number; downbeat: number; sections: number };
+  /** `meter` (optional, 0..1): how decisive the 3-or-4 beats-per-bar estimate was (absent on maps from older analyzers and on live maps). */
+  confidence: { tempo: number; downbeat: number; sections: number; meter?: number };
   /** Features estimated without stem separation, e.g. 'vocal', 'drums'. */
   approximations: string[];
 }
