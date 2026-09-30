@@ -24,6 +24,8 @@ export interface SpectrumTextures {
   bands: number;
   waveRate: number;
   waveFrames: number;
+  /** AAAVS: media time of frame 0 and wave sample 0 (AudioData.origin). */
+  origin: number;
 }
 
 export function createSpectrumTextures(a: AudioData): SpectrumTextures {
@@ -49,7 +51,7 @@ export function createSpectrumTextures(a: AudioData): SpectrumTextures {
     mel: tex(mel, PACK * M, rows, THREE.RedFormat, THREE.UnsignedByteType),
     chroma: tex(chroma, PACK * 12, rows, THREE.RedFormat, THREE.UnsignedByteType),
     wave: tex(wave, WAVE_W, wrows, THREE.RGFormat, THREE.FloatType),
-    frames: F, fps: a.fps, bands: M, waveRate: a.waveRate, waveFrames: wn,
+    frames: F, fps: a.fps, bands: M, waveRate: a.waveRate, waveFrames: wn, origin: a.origin,
   };
 }
 
@@ -75,7 +77,7 @@ export function refreshSpectrumTextures(s: SpectrumTextures, a: AudioData, d: { 
 export function spectrumUniforms(s: SpectrumTextures) {
   return {
     uMel: { value: s.mel }, uChroma: { value: s.chroma }, uWave: { value: s.wave },
-    uSpecInfo: { value: new THREE.Vector4(s.frames, s.fps, s.bands, 0) },
+    uSpecInfo: { value: new THREE.Vector4(s.frames, s.fps, s.bands, s.origin) },
     uWaveInfo: { value: new THREE.Vector2(s.waveFrames, s.waveRate) },
   };
 }
@@ -89,7 +91,7 @@ export function spectrumUniforms(s: SpectrumTextures) {
  */
 export const SPECTRUM_GLSL = /* glsl */ `
 uniform sampler2D uMel; uniform sampler2D uChroma; uniform sampler2D uWave;
-uniform vec4 uSpecInfo; // frames, fps, bands, -
+uniform vec4 uSpecInfo; // frames, fps, bands, origin (media time of frame 0 and wave sample 0)
 uniform vec2 uWaveInfo; // frames, rate
 float melTexel(int f, int b) {
   int F = int(uSpecInfo.x), B = int(uSpecInfo.z);
@@ -97,7 +99,7 @@ float melTexel(int f, int b) {
   return texelFetch(uMel, ivec2((f % ${PACK}) * B + b, f / ${PACK}), 0).r;
 }
 float melAt(float t, float band) {
-  float x = clamp(t * uSpecInfo.y, 0.0, uSpecInfo.x - 1.001);
+  float x = clamp((t - uSpecInfo.w) * uSpecInfo.y, 0.0, uSpecInfo.x - 1.001);
   int f = int(floor(x)); float ft = x - float(f);
   float bb = clamp(band, 0.0, uSpecInfo.z - 1.001);
   int b = int(floor(bb)); float fb = bb - float(b);
@@ -111,7 +113,7 @@ float melAvg(float t, float b0, float b1) {
   return s / max(n, 1.0);
 }
 float chromaAt(float t, int k) {
-  float x = clamp(t * uSpecInfo.y, 0.0, uSpecInfo.x - 1.001);
+  float x = clamp((t - uSpecInfo.w) * uSpecInfo.y, 0.0, uSpecInfo.x - 1.001);
   int f = int(floor(x)); float ft = x - float(f);
   int F = int(uSpecInfo.x);
   float a = texelFetch(uChroma, ivec2((f % ${PACK}) * 12 + k, f / ${PACK}), 0).r;
@@ -124,7 +126,7 @@ vec2 waveTexel(int i) {
   return texelFetch(uWave, ivec2(i % ${WAVE_W}, i / ${WAVE_W}), 0).rg;
 }
 vec2 waveAt(float t) {
-  float x = clamp(t * uWaveInfo.y, 0.0, uWaveInfo.x - 1.001);
+  float x = clamp((t - uSpecInfo.w) * uWaveInfo.y, 0.0, uWaveInfo.x - 1.001);
   int i = int(floor(x));
   return mix(waveTexel(i), waveTexel(i + 1), x - float(i));
 }

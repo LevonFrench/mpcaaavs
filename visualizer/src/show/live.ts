@@ -25,8 +25,10 @@ export interface LiveClock {
   firstBeat?: number;
   /** PCM rate the AVS frames were analysed at. Default 44100. */
   sampleRate?: number;
-  /** Seconds of history kept (arrays are allocated for min(duration, maxSeconds)). Default 1200. */
+  /** Seconds of analysis kept from `origin` (arrays hold min(duration - origin, maxSeconds)). Default 1200. */
   maxSeconds?: number;
+  /** Media time of the first analysis frame (a window around the playing scene). Default 0. */
+  origin?: number;
 }
 
 const FPS = 100;
@@ -100,7 +102,8 @@ export class LiveAudioData extends AudioData {
     const map = liveSongMap(clock);
     super(map);
     this.sampleRate = clock.sampleRate ?? 44100;
-    const seconds = Math.min(map.duration, clock.maxSeconds ?? 1200);
+    this.origin = Math.max(0, Math.min(map.duration, clock.origin ?? 0));
+    const seconds = Math.max(1, Math.min(map.duration - this.origin, clock.maxSeconds ?? 1200));
     this.capacityFrames = Math.max(1, Math.ceil(seconds * FPS) + 1);
     for (const k of ['rms', 'low', 'mid', 'high', 'vocal', 'drums', 'bass', 'other']) this.feat[k] = new Float32Array(this.capacityFrames);
     this.spec = new Uint8Array(this.capacityFrames * S);
@@ -131,8 +134,8 @@ export class LiveAudioData extends AudioData {
    * onsets after t (the arrays are simply overwritten as playback continues).
    */
   push(t: number, frame: AvsAudioFrame): void {
-    if (!Number.isFinite(t) || t < 0) return;
-    const fi = Math.round(t * FPS);
+    if (!Number.isFinite(t) || t < this.origin) return;
+    const fi = Math.round((t - this.origin) * FPS);
     if (fi >= this.capacityFrames) return;
     if (this.lastT >= 0 && t < this.lastT - 0.05) {
       for (const k of ['kick', 'snare', 'hat', 'vocal']) {
@@ -190,9 +193,10 @@ export class LiveAudioData extends AudioData {
 
     // waveform: the 576 samples end at t, resampled to LIVE_WAVE_RATE
     const dur = SAMPLES / this.sampleRate, wn = this.wave.length >> 1;
-    const w0 = Math.max(0, Math.ceil((t - dur) * LIVE_WAVE_RATE)), w1 = Math.min(wn - 1, Math.floor(t * LIVE_WAVE_RATE));
+    const rt = t - this.origin; // window-relative time of the frame's end
+    const w0 = Math.max(0, Math.ceil((rt - dur) * LIVE_WAVE_RATE)), w1 = Math.min(wn - 1, Math.floor(rt * LIVE_WAVE_RATE));
     for (let s = w0; s <= w1; s++) {
-      const x = Math.min(SAMPLES - 1, Math.max(0, (s / LIVE_WAVE_RATE - (t - dur)) * this.sampleRate)), i = Math.floor(x), fr = x - i, j = Math.min(SAMPLES - 1, i + 1);
+      const x = Math.min(SAMPLES - 1, Math.max(0, (s / LIVE_WAVE_RATE - (rt - dur)) * this.sampleRate)), i = Math.floor(x), fr = x - i, j = Math.min(SAMPLES - 1, i + 1);
       this.wave[2 * s] = signed(frame.waveform[0][i]!) * (1 - fr) + signed(frame.waveform[0][j]!) * fr;
       this.wave[2 * s + 1] = signed(frame.waveform[1][i]!) * (1 - fr) + signed(frame.waveform[1][j]!) * fr;
     }

@@ -61,7 +61,8 @@ export function buildBank(au: AudioData, t0: number, t1: number, b12: number, b1
     const rs = t >= lb && t < b13 ? (hash(Math.floor(t * 90), 7) > 0.8 ? (hash(Math.floor(t * 90), 9) * 2 - 1) * 0.6 * ((t - lb) / 0.45) : 0) : 0;
     // 0: raw waveform min/max over the slot
     {
-      const a = Math.max(0, Math.floor((t0 + i / RATE) * wr)), b = Math.min(wn - 1, Math.ceil((t0 + (i + 1) / RATE) * wr));
+      // AAAVS: the waveform starts at au.origin (0 for a song map, the live window's start for the live fallback)
+      const a = Math.max(0, Math.floor((t0 + i / RATE - au.origin) * wr)), b = Math.min(wn - 1, Math.ceil((t0 + (i + 1) / RATE - au.origin) * wr));
       let lo = 1, hi = -1;
       for (let s = a; s <= b; s++) { const v = (W[2 * s]! + W[2 * s + 1]!) * 0.5; if (v < lo) lo = v; if (v > hi) hi = v; }
       if (hi < lo) lo = hi = 0;

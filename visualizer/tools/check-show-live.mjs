@@ -158,6 +158,23 @@ eq(live.bassMidi(3), 0, 'bass pitch is unknown live');
   eq(a.revision, 0, 'invalid times are ignored');
 }
 
+// origin: a window starting at 100 s reads the same analysis at media time 100 + x as a window at 0 reads at x
+{
+  const w = new LiveAudioData({ duration: 400, bpm: BPM, origin: 100, maxSeconds: 30 });
+  eq(w.origin, 100, 'origin window');
+  eq(w.capacityFrames, 3001, 'origin window capacity');
+  for (const [t, f] of F) w.push(t + 100, f);
+  eq(w.onsets.kick.map(([t, s]) => [+(t - 100).toFixed(9), s]), live.onsets.kick.map(([t, s]) => [+t.toFixed(9), s]), 'origin: onsets are absolute media times');
+  for (const x of [0.5, 2.03, 4.51, 7.2]) {
+    near(w.env('low', 100 + x), live.env('low', x), 1e-6, `origin: env at ${x}`);
+    near(w.mel(100 + x, 3), live.mel(x, 3), 1e-6, `origin: mel at ${x}`);
+    near(w.waveAt(100 + x)[0], live.waveAt(x)[0], 1e-6, `origin: waveAt at ${x}`);
+  }
+  const before = w.revision;
+  w.push(99, F[10][1]);
+  eq(w.revision, before, 'a push before the origin is ignored');
+}
+
 // ------------------------------------------------------------------ worker messages
 const buf = (len) => new ArrayBuffer(len);
 const audioMsg = (o = {}) => ({ type: 'show-audio', generation: 1, time: 1.5, waveform: buf(1152), spectrum: buf(1152), beat: false, beatLevel: 0, ...o });

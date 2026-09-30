@@ -57,6 +57,9 @@ export class AudioData {
   readonly map: SongMapJSON;
   /** Set on a plate view made by withBarMap(). */
   barMap: BarMap | null = null;
+  /** AAAVS: media time of frame 0 of the envelopes, spectrogram, bass pitch and waveform (0 for a song map; the live
+   *  fallback keeps a window around the playing scene, see live.ts). The beat grid and onsets are absolute. */
+  origin = 0;
 
   constructor(j: SongMapJSON, bin?: Partial<SongMapBinary> | null) {
     this.map = j;
@@ -126,7 +129,7 @@ export class AudioData {
   mel(t: number, band: number): number {
     const F = this.specFrames, S = this.MEL + AudioData.CHROMA;
     if (!F) return 0;
-    const x = Math.max(0, Math.min(F - 1.001, t * this.fps)), i = Math.floor(x), f = x - i;
+    const x = Math.max(0, Math.min(F - 1.001, (t - this.origin) * this.fps)), i = Math.floor(x), f = x - i;
     const b = Math.max(0, Math.min(this.MEL - 1.001, band)), bi = Math.floor(b), bf = b - bi;
     const at = (fi: number, bb: number) => this.spec[fi * S + bb]!;
     const v0 = at(i, bi) * (1 - bf) + at(i, bi + 1) * bf, v1 = at(i + 1, bi) * (1 - bf) + at(i + 1, bi + 1) * bf;
@@ -143,7 +146,7 @@ export class AudioData {
   chroma(t: number, out = new Float32Array(12)): Float32Array {
     const F = this.specFrames, S = this.MEL + AudioData.CHROMA;
     if (!F) return out.fill(0);
-    const x = Math.max(0, Math.min(F - 1.001, t * this.fps)), i = Math.floor(x), f = x - i;
+    const x = Math.max(0, Math.min(F - 1.001, (t - this.origin) * this.fps)), i = Math.floor(x), f = x - i;
     for (let k = 0; k < 12; k++) out[k] = (this.spec[i * S + this.MEL + k]! * (1 - f) + this.spec[(i + 1) * S + this.MEL + k]! * f) / 255;
     return out;
   }
@@ -152,14 +155,14 @@ export class AudioData {
   bassMidi(t: number): number {
     const a = this.bassMidiArr;
     if (!a.length) return 0;
-    return a[Math.max(0, Math.min(a.length - 1, Math.round(t * this.fps)))]!;
+    return a[Math.max(0, Math.min(a.length - 1, Math.round((t - this.origin) * this.fps)))]!;
   }
 
   /** Waveform sample at t: [L, R] (−1..1), linear interpolation. */
   waveAt(t: number, out: [number, number] = [0, 0]): [number, number] {
     const n = this.wave.length >> 1;
     if (!n) { out[0] = out[1] = 0; return out; }
-    const x = Math.max(0, Math.min(n - 1.001, t * this.waveRate)), i = Math.floor(x), f = x - i;
+    const x = Math.max(0, Math.min(n - 1.001, (t - this.origin) * this.waveRate)), i = Math.floor(x), f = x - i;
     out[0] = this.wave[2 * i]! * (1 - f) + this.wave[2 * i + 2]! * f;
     out[1] = this.wave[2 * i + 1]! * (1 - f) + this.wave[2 * i + 3]! * f;
     return out;
@@ -188,7 +191,7 @@ export class AudioData {
   env(name: string, t: number): number {
     const a = this.feat[name];
     if (!a || a.length === 0) return 0;
-    const x = t * this.fps;
+    const x = (t - this.origin) * this.fps;
     const i = Math.floor(x);
     if (i < 0) return a[0]!;
     if (i >= a.length - 1) return a[a.length - 1]!;
