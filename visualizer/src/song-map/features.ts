@@ -7,6 +7,7 @@ import type { SongMapFeature } from './types.ts';
 
 export const FEATURE_NAMES: readonly SongMapFeature[] = ['rms', 'low', 'mid', 'high', 'vocal', 'drums', 'bass', 'other'];
 const HPSS_TIME = 6;   // +-6 frames (130 ms) harmonic median
+const ONSET_GATE_DB = { kick: 15, snare: 15, hat: 12 } as const;
 const HPSS_FREQ = 4;   // +-4 mel bands percussive median
 
 export interface Derived {
@@ -110,11 +111,18 @@ function strength01(values: number[]): number[] {
 const round3 = (x: number) => Math.round(x * 1000) / 1000;
 
 function finalizeOnsets(store: FeatureStore, vocalRaw: Float32Array, harmonicMid: Float32Array, islands: readonly (readonly [number, number])[], covered: Uint8Array) {
+  // Level gate: an attack far below the track's typical attack level of its own band is bass residue
+  // or bleed, not a drum hit (soft ghost notes are traded away for far fewer false hits).
+  const gate = (list: OnsetCandidate[], below: number) => {
+    if (!list.length) return list;
+    const ref = percentile(list.map(c => c.db), 95);
+    return list.filter(c => c.db >= ref - below);
+  };
   const sort = (list: OnsetCandidate[]) => [...list].sort((a, b) => a.t - b.t);
   // Kicks: low-band attacks that decay (a sustained bass note entering is not a drum hit).
-  const kicks = sort(store.onsets.kick).filter(c => c.extra >= 3);
+  const kicks = sort(gate(store.onsets.kick, ONSET_GATE_DB.kick)).filter(c => c.extra >= 3);
   // Snares: 1.5-5 kHz attacks with a long noisy 0.5-5 kHz tail (upstream drum_onsets rule).
-  let snares = sort(store.onsets.snare);
+  let snares = sort(gate(store.onsets.snare, ONSET_GATE_DB.snare));
   if (snares.length) {
     const tails = snares.map(c => c.extra), thr = percentile(tails, 95) - 25;
     snares = snares.filter((c, i) => {
@@ -130,7 +138,7 @@ function finalizeOnsets(store: FeatureStore, vocalRaw: Float32Array, harmonicMid
     while (lo < hi) { const m = (lo + hi) >> 1; if (list[m]!.t < t) lo = m + 1; else hi = m; }
     return (lo < list.length && Math.abs(list[lo]!.t - t) <= gap) || (lo > 0 && Math.abs(list[lo - 1]!.t - t) <= gap);
   };
-  const hats = sort(store.onsets.hat).filter(c => !near(snares, c.t, .04) && !near(kicks, c.t, .03));
+  const hats = sort(gate(store.onsets.hat, ONSET_GATE_DB.hat)).filter(c => !near(snares, c.t, .04) && !near(kicks, c.t, .03));
   const pack = (list: OnsetCandidate[], strength: number[]) => list.map((c, i) => [round3(c.t), round3(strength[i]!)] as [number, number]);
   const kick = pack(kicks, strength01(kicks.map(c => c.db)));
   const snare = pack(snares, strength01(snares.map(c => c.extra)));
