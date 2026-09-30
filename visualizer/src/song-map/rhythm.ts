@@ -358,7 +358,8 @@ function analyzeIsland(input: RhythmInput, a: number, b: number) {
       end = bestT;
     }
     regionStarts.push(beats.length);
-    for (const t of gridBeats(region.grid, cursor, end)) {
+    // The seam beat may sit a hair before the join point: take grid beats from 40% of a beat early.
+    for (const t of gridBeats(region.grid, r > 0 ? cursor - .4 * region.grid.period : cursor, end)) {
       const last = beats[beats.length - 1];
       if (last !== undefined && t - last < .6 * region.grid.period) continue;
       beats.push(t);

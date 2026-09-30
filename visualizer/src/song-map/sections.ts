@@ -142,7 +142,8 @@ function label(list: Bar[], drafts: Draft[], pitched: boolean): SectionRole[] {
   const maxFull = Math.max(1e-9, ...st.filter((_, i) => full[i]).map(s => s.energy));
   const high = st.map((s, i) => full[i]! && s.energy >= .85 * maxFull);
   // Snare rolls and rising sections build; a drop is a full, high-energy section that is not itself building.
-  const building = st.map(s => s.rising || s.roll || s.snareRate >= 1.5);
+  // A riser is also a full-drum section whose bass has been cut while the level stays up.
+  const building = st.map(s => s.rising || s.roll || s.snareRate >= 1.5 || (s.drums && !s.low && s.energy >= .5 * maxE));
   const dropLike = st.map((s, i) => high[i]! && !building[i]);
   const roles = new Array<SectionRole | null>(n).fill(null);
   for (let i = last - 1; i >= 0; i--) {
@@ -179,7 +180,7 @@ function islandSections(input: SectionInput, a: number, b: number): { drafts: Dr
   const values = Array.from(N.subarray(1));
   const max = Math.max(1e-9, ...values), med = values.length ? median(values) : 0;
   const mad = values.length ? median(values.map(v => Math.abs(v - med))) : 0;
-  const thr = Math.max(.3 * max, med + 1.8 * 1.4826 * mad);
+  const thr = Math.max(.25 * max, med + 1.2 * 1.4826 * mad);
   const onPhrase = (bar: number) => phraseRef < 0 || list[bar]!.db < 0 || ((list[bar]!.db - phraseRef) % 4 + 4) % 4 === 0;
   const picked = new Map<number, number>();
   for (let bar = 1; bar < n; bar++) {
