@@ -165,10 +165,29 @@ async function presetLoad(m: Extract<AvsWorkerRequest, { type: 'load' }>) {
   }
 }
 
+// GPU frame pacing: at most one frame in flight. Without it, when the GPU is slower than the host's requests (4K on a
+// slow GPU, SwiftShader), submitted frames pile up in the command queue: latency grows without bound and the next
+// synchronous GL call (a resize, a readback) waits for the whole backlog.
+let inFlight: WebGLSync | null = null;
+async function waitForGpu() {
+  const gl = presetEngine?.renderer.getContext() as WebGL2RenderingContext | undefined;
+  if (!gl || !inFlight) return;
+  while (gl.clientWaitSync(inFlight, 0, 0) === gl.TIMEOUT_EXPIRED) await new Promise((r) => setTimeout(r, 1));
+  gl.deleteSync(inFlight); inFlight = null;
+}
+function fenceFrame() {
+  const gl = presetEngine?.renderer.getContext() as WebGL2RenderingContext | undefined;
+  if (!gl) return;
+  if (inFlight) gl.deleteSync(inFlight);
+  inFlight = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+  gl.flush();
+}
+
 async function presetRender(m: AvsWorkerRenderMessage) {
   if (legacy) { legacy(m); return; }
   if (m.generation !== presetGen || !presetPlate || !presetEngine) return;
   try {
+    await waitForGpu(); // the previous frame has finished on the GPU (the host measures this wait as frame time)
     const started = performance.now();
     if (!Number.isFinite(m.width) || !Number.isFinite(m.height)) throw Error('Invalid scene size');
     const { width, height } = fitWithin(m.width, m.height, HARD_MAX_EDGE, HARD_MAX_PIXELS);
@@ -197,6 +216,7 @@ async function presetRender(m: AvsWorkerRenderMessage) {
       renderPlate(w.current.key, clock.time);
       drawFitted(out, width, height);
     }
+    fenceFrame();
     const bitmap = out.transferToImageBitmap(), elapsed = performance.now() - started;
     post({ type: 'frame', generation: presetGen, sequence: m.sequence, bitmap, pcm: m.pcm, width, height, unsupported: 0, renderMs: elapsed > 0 ? elapsed : 0, engineScale: SCALE }, [bitmap, m.pcm]);
   } catch (error) {
@@ -226,7 +246,7 @@ async function presetMessage(m: AvsWorkerRequest) {
   if (m.type === 'render') {
     if (!legacy && presetEngine && m.generation === presetGen) {
       const want = scaleSwitch.observe(m.width, m.height);
-      if (want !== null) switchScale(want);
+      if (want !== null) { await waitForGpu(); switchScale(want); }
     }
     await presetRender(m);
     return;
