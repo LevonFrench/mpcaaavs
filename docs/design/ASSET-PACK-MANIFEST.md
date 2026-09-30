@@ -28,7 +28,7 @@ show-assets-private/<pack-id>/
 The hosts read packs next to the page that runs them, through the same local-file route as the preset collection
 (`avs presets/`): the MPC host maps `visualizer/` to `https://aaavs.invalid/` (WebView2 virtual host) and the standalone Player
 serves `visualizer/` (`tools/serve.mjs`). So the installed location is `visualizer/show-assets-private/<pack-id>/`; on a
-development machine, copy or link the extraction output there. `fetchPackSource(packId)` (`source.ts`) is the MPC host's production
+development machine, copy or link the extraction output there (the MPC host follows links; the Player's library server refuses them, so copy). `fetchPackSource(packId)` (`source.ts`) is the MPC host's production
 adapter (the Player reads through its library server, see "Host wiring"): it builds `./show-assets-private/<pack-id>/<path>` against the page URL and reads it with the bounded reader of
 `avs/local-assets.ts`. A 404 means "not installed". Hosts never duplicate pack logic; they only differ in how the folder is
 served. `memoryPackSource` (tests, generated packs) and `tools/asset-pack-fs-source.mjs` (Node tools and checks) implement the
@@ -196,6 +196,9 @@ PNG headers against declared sizes, decode with `createImageBitmap`) and stores 
 `getShowPack()` and passes it to `drawSprite` / `drawGlyphs`: `null` (nothing sent, absent, invalid, cleared, or still decoding) means stand-ins,
 so plates never branch on it. A failed validation empties the registry (no half-used pack); the last message wins. `validateShowRequest` bounds
 the message: a valid id, a manifest of at most 512 KiB, at most 16 atlases of at most 8 MiB each and 32 MiB in total, plain `ArrayBuffer`s.
+
+Native additions: none. The MPC host needs no new bridge message, registry value or virtual host mapping (it already serves `visualizer/`), and the
+setting is page-local, so nothing is added to the native wire.
 
 Costs to know: the pack bytes are posted to every show worker the host starts (a scene change starts a worker), so a large pack is copied and
 decoded per scene; plates draw stand-ins until their worker has decoded it. Not done: changing the setting at run time (reload the page), and

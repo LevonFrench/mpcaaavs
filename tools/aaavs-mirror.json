@@ -104,6 +104,10 @@
       "target": "tools/standalone-library.mjs"
     },
     {
+      "source": "visualizer/tools/show-pack-server.mjs",
+      "target": "tools/show-pack-server.mjs"
+    },
+    {
       "source": "docs/SONG-ANALYSIS-AND-HUD-DRIVERS.md",
       "target": "docs/SONG-ANALYSIS-AND-HUD-DRIVERS.md"
     },
