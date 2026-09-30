@@ -38,6 +38,7 @@ manager.receive('setups-loaded',[]);click('New setup');click('Add to setup');
 const other=root.all().find(e=>e.tagName==='button'&&e.textContent.includes('Preset 1'));other.onclick();click('Add to setup');
 change('Setup shuffle minimum rating',4);click('Save setup');assert.equal(requests.at(-1).op,'save-setups');assert.deepEqual(requests.at(-1).setups[0].presets,catalog.map(p=>p.sha256));assert.equal(requests.at(-1).setups[0].settings.minimumRating,4);
 const persisted=JSON.parse(JSON.stringify(requests.at(-1).setups));manager.receive('setups-saved');
+assert.deepEqual(manager.acknowledgedSetups(),parseSetups(persisted),'a save acknowledgement (no payload) exposes the acknowledged setup contents for Multiview');
 click('Activate setup');assert.deepEqual(activated.at(-1).presets,catalog.map(p=>p.sha256));
 click('Use entire library');assert.equal(activated.at(-1),null);
 click('Load preset');assert.deepEqual(loaded,[1]);click('5 ★');assert.deepEqual(rates,[[1,5]]);

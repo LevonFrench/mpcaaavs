@@ -27,6 +27,7 @@ import { fetchLocalCategories, type TaxonMap } from './avs/preset-categories.ts'
 import * as collectionApi from './avs/local-collection.ts';
 import type { AvsAudioFrame } from './avs/types.ts';
 import { MultiViewSession } from './multi-view-session.ts';
+import { isInteractiveTarget } from './keyboard-guard.ts';
 interface Bridge { postMessage(message: string): void; addEventListener(type: 'message', listener: (event: MessageEvent) => void): void }
 // Both players run this host. Only media transport and library persistence vary.
 const platform = window as unknown as { chrome?: { webview?: Bridge }; aaavsBridge?: Bridge };
@@ -247,7 +248,7 @@ const multiView=new MultiViewSession({catalog:()=>catalog,presets:fetchLocalAvsP
   storage:()=>{try{return globalThis.localStorage;}catch{return undefined;}},requestSets:()=>sendLibrary({op:'load-setups'}),
   mode:enabled=>{cancelPrepared();dispose(active);active=null;dispose(outgoing);outgoing=null;transition=null;director.rearm();dirty=true;
     if(enabled)label.textContent='Multiview · loading panels';else void prepare(presets.index,false);},
-  announce,failed:index=>{failed.add(index);failureRevision++;},failures:()=>failed,
+  announce,failed:index=>{failed.add(index);failureRevision++;},failures:()=>failed,now:()=>performance.now(),
   present:(surface,now)=>{if(canvas.width!==surface.width||canvas.height!==surface.height){canvas.width=surface.width;canvas.height=surface.height;flash.reset();}
     if(canvas.style)canvas.style.imageRendering='auto';
     flash.present(context,surface,now/1000,()=>{context.imageSmoothingEnabled=true;context.drawImage(surface,0,0,canvas.width,canvas.height);});
@@ -479,7 +480,13 @@ bridge?.addEventListener('message', event => {
       announce(`${old.name} · ${'★'.repeat(entry.rating)} · filename and Date modified saved`);management.refresh();
     }
     if(ratings.length)sendLibrary({op:'rate',hash:catalog[ratings[0]!.index]!.sha256,rating:ratings[0]!.value});
-  } else if(message.type==='setups-loaded'||message.type==='setups-saved') {management.receive(message.type,message.setups);multiView.receiveSets(message.setups);
+  } else if(message.type==='setups-loaded') {management.receive(message.type,message.setups);multiView.receiveSets(message.setups);
+  } else if(message.type==='setups-saved') {
+    // A save acknowledgement, not setup data: native and browser hosts send no setups. The manager's acknowledged list (the saved,
+    // edited or deleted contents) refreshes Multiview; an acknowledgement that does echo its setups is used as sent.
+    management.receive(message.type,message.setups);
+    const acknowledged=Array.isArray(message.setups)?message.setups:management.acknowledgedSetups();
+    if(acknowledged)multiView.receiveSets(acknowledged);
   } else if(message.type==='state-loaded'||message.type==='state-saved') {management.receive(message.type,{name:message.name,data:message.data});
   } else if(message.type==='play-folder') {management.playLastFolder();
   } else if(message.type==='library-error'&&(message.operation==='load-state'||message.operation==='save-state')) {management.receive(message.type,{name:message.name,message:message.message},message.operation);
@@ -521,7 +528,10 @@ function frame(now: number) {
   if (!flash.available) { status.textContent = 'Visualizer paused: flash protection unavailable'; document.body.classList.add('protection-error'); }
   if(multiView.frame(now)){
     const fpsText=fpsLabel.segment(now,{present:fps.present.read(now),display:fps.display.read(now),render:fps.render.read(now),clock:fps.clock.read(now)},sizer.prefs.showFps,playing&&hostVisible&&!document.hidden);
-    timing.textContent=`Multiview · ${multiView.bpm.toFixed(1)} BPM${fpsText?` · ${fpsText}`:''}`;
+    // Composite submission FPS and pane frame age are separate channels: a smooth composite can still show stale pane frames.
+    const age=multiView.frameAge,ageText=sizer.prefs.showFps&&playing&&age!==null?` · panes ${Math.round(age)} ms old`:'';
+    const line=`Multiview · ${multiView.bpm.toFixed(1)} BPM${fpsText?` · ${fpsText}`:''}${ageText}`;
+    if(timing.textContent!==line)timing.textContent=line;
     requestAnimationFrame(frame);return;
   }
   const bars = director.remainingBars;
@@ -567,7 +577,9 @@ document.addEventListener('keydown', event => {
   if(!event.ctrlKey&&!event.altKey&&!event.shiftKey&&(event.code==='F6'||event.code==='F7')){event.preventDefault();if(!event.repeat)bridge?.postMessage(event.code==='F7'?'rate-up':'rate-down');return;}
   if(!event.ctrlKey&&!event.altKey&&!event.shiftKey&&event.code==='F8'){event.preventDefault();if(!event.repeat)bridge?.postMessage('mark-not-working');return;}
   if(management.open){if(event.code==='Escape'){event.preventDefault();management.show(0);bridge?.postMessage('panel-close');}return;}
-  if (event.code === 'F10' && event.shiftKey || event.code === 'ContextMenu') { event.preventDefault(); bridge?.postMessage('options'); return; } if (event.code === 'Space' && !event.repeat) { event.preventDefault(); bridge?.postMessage('play-pause'); }
+  if (event.code === 'F10' && event.shiftKey || event.code === 'ContextMenu') { event.preventDefault(); bridge?.postMessage('options'); return; }
+  // Space activates a focused control (the embedded Multiview launcher, a checkbox, a field); only elsewhere is it play/pause.
+  if (event.code === 'Space' && !event.repeat && !isInteractiveTarget(event.target)) { event.preventDefault(); bridge?.postMessage('play-pause'); }
 });
 window.addEventListener('pagehide', () => { closed = true;stopDeviceWatch?.();management.dispose?.();multiView.close(); clearTimeout(announceTimer); cancelPrepared(); dispose(active); dispose(outgoing); });
 bridge?.postMessage('host-ready');

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, linkSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -25,5 +25,21 @@ try{
   const linked=path.join(root,'linked');symlinkSync(target,linked,process.platform==='win32'?'junction':'dir');await assert.rejects(()=>installHudPresets(linked,installOptions),/Linked/);
   const traversal=path.join(root,'traversal');mkdirSync(path.join(traversal,'catalog'),{recursive:true});const malicious=structuredClone(catalog);malicious.presets[1].canonical_path='presets/unique/../../escape.hud';writeFileSync(path.join(traversal,'catalog','presets.json'),JSON.stringify(malicious));await assert.rejects(()=>installHudPresets(traversal,installOptions),/Invalid HUD preset path/);assert.equal(existsSync(path.join(root,'escape.hud')),false);
   const conflict=path.join(root,'conflict');mkdirSync(path.join(conflict,'presets','unique'),{recursive:true});const fresh=await generate({...options,outDir:source,privateDir});writeFileSync(path.join(conflict,'presets','unique',`HUD ${fresh.rows[0].manifest.id}.hud`),'different bytes');await assert.rejects(()=>installHudPresets(conflict,installOptions),/occupied/);assert.equal(existsSync(path.join(conflict,'catalog','presets.json')),false,'preflight before catalog mutation');
-  console.log('HUD installer: synthetic bank, hash merge/idempotence, ratings/name/mtime/setup preservation, private overlay, traversal, locks, junctions and occupied paths PASS');
+  // Fault injection: an interrupted new-preset write never leaves a final-path file, a retry installs cleanly, and a destination
+  // that appears between preflight and publish is never overwritten.
+  const unique=dir=>path.join(dir,'presets','unique'),huds=dir=>existsSync(unique(dir))?readdirSync(unique(dir)).filter(n=>n.endsWith('.hud')):[],temps=dir=>existsSync(unique(dir))?readdirSync(unique(dir)).filter(n=>n.endsWith('.writing')):[];
+  const partial=(fd,bytes)=>{writeFileSync(fd,bytes.subarray(0,Math.max(1,bytes.length>>1)));throw Error('injected interruption');};
+  const fault=path.join(root,'fault');
+  await assert.rejects(()=>installHudPresets(fault,{...installOptions,io:{write:partial}}),/injected interruption/);
+  assert.deepEqual(huds(fault),[],'a partial write leaves no final-path preset');assert.deepEqual(temps(fault),[],'the failed temporary is removed');assert.equal(existsSync(path.join(fault,'catalog','presets.json')),false,'no catalog before presets publish');
+  // A process killed mid-write skips its cleanup: the temporary stays behind and must not block the retry either.
+  await assert.rejects(()=>installHudPresets(fault,{...installOptions,io:{write:partial,unlink:()=>{}}}),/injected interruption/);
+  assert.equal(temps(fault).length,1,'simulated crash leaves one temporary');assert.deepEqual(huds(fault),[]);
+  const retried=await installHudPresets(fault,installOptions);assert.equal(retried.added,retried.scenes,'retry after interruption installs every scene');assert.deepEqual(temps(fault),[],'retry clears stale temporaries');
+  const faultCatalog=JSON.parse(readFileSync(path.join(fault,'catalog','presets.json'),'utf8'));
+  for(const row of faultCatalog.presets)assert.equal(statSync(path.join(fault,...row.canonical_path.split('/'))).size,row.bytes,'published presets are complete');
+  const race=path.join(root,'race');let raced=null;
+  await assert.rejects(()=>installHudPresets(race,{...installOptions,io:{link:(tmp,file)=>{if(!raced){raced=file;writeFileSync(file,'owner bytes');}return linkSync(tmp,file);}}}),/occupied/);
+  assert.equal(readFileSync(raced,'utf8'),'owner bytes','a destination that appeared after preflight is never overwritten');assert.deepEqual(temps(race),[]);
+  console.log('HUD installer: synthetic bank, hash merge/idempotence, ratings/name/mtime/setup preservation, private overlay, traversal, locks, junctions, occupied paths and interrupted-write retry/no-clobber publish PASS');
 }finally{removeScratch(root);}

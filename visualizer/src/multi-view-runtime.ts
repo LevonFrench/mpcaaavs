@@ -3,6 +3,7 @@ import type { AvsAudioFrame } from './avs/types.ts';
 import { pickFade, planFade } from './mpc-transition-timing.ts';
 import { MultiViewClock, type MultiViewLaneFrame } from './multi-view-clock.ts';
 import { multiViewTransitionSeed, type MultiViewPaneImage } from './multi-view-compositor.ts';
+import type { MultiViewPlan } from './multi-view-model.ts';
 export interface MultiViewBitmap { readonly width: number; readonly height: number; close(): void }
 export interface MultiViewRenderFrame {
   readonly lane: MultiViewLaneFrame;
@@ -26,8 +27,12 @@ export interface MultiViewRuntimeHost {
   smooth?(index: number): boolean;
   /** Resolution/policy identity: a paused pane still rerenders when its viewport settles after a layout or DPR change. */
   renderKey?(index: number, pane: number): string;
+  /** Monotonic milliseconds for frame measurements (defaults to the last tick time). */
+  now?(): number;
+  /** One ACCEPTED, visible, playing pane frame and its request-to-bitmap cost. Stale, preload and paused frames are never reported. */
+  measured?(index: number, pane: number, frameMs: number): void;
 }
-interface Slot { renderer: MultiViewRenderer; index: number; bitmap: MultiViewBitmap | null; busy: boolean; revision: number; sent: number; dead: boolean; key: string }
+interface Slot { renderer: MultiViewRenderer; index: number; bitmap: MultiViewBitmap | null; busy: boolean; revision: number; sent: number; dead: boolean; key: string; accepted: number }
 interface Pending { abort: AbortController; index: number; frame: MultiViewLaneFrame; slot: Slot | null; started: number; dead: boolean }
 interface Lane { current: Slot | null; pending: Pending | null; old: MultiViewBitmap | null; oldIndex: number; start: number; duration: number; seed: number; retryAt: number; errorKey: string }
 const lane = (): Lane => ({ current: null, pending: null, old: null, oldIndex: -1, start: 0, duration: 0, seed: 1, retryAt: 0, errorKey: '' });
@@ -42,13 +47,29 @@ export class MultiViewRuntime {
   private now = 0;
   private visible = true;
   private playing = false;
-  constructor(private clock: MultiViewClock, private readonly host: MultiViewRuntimeHost) { this.lanes = Array.from({ length: clock.plan.count }, lane); }
+  /** Presentation policy (pane transitions, fade lengths). Updated in place: it never discards cues, selections or loaded panes. */
+  private policy: MultiViewPlan;
+  constructor(private clock: MultiViewClock, private readonly host: MultiViewRuntimeHost) { this.lanes = Array.from({ length: clock.plan.count }, lane); this.policy = clock.plan; }
   get plan() { return this.clock.plan; }
+  private stamp() { const now = this.host.now?.(); return typeof now === 'number' && Number.isFinite(now) ? now : this.now; }
+  /** Adopt a new presentation policy without reconfiguring lanes. A fade already running keeps its planned span; Cut applies at once. */
+  present(plan: MultiViewPlan) {
+    if (this.closed) return;
+    this.policy = plan;
+    for (let i = 0; i < this.lanes.length; i++) { const l = this.lanes[i]!; if (l.old && plan.panes[i]?.transition === 'cut') { l.old.close(); l.old = null; } }
+    this.host.changed();
+  }
+  /** Age in ms of the oldest displayed pane frame (the frame-age channel, separate from composite submission FPS); null before any frame. */
+  frameAge(): number | null {
+    const now = this.stamp(); let age: number | null = null;
+    for (const l of this.lanes) if (l.current?.bitmap && l.current.accepted > 0) age = Math.max(age ?? 0, now - l.current.accepted);
+    return age;
+  }
   currentIndex(pane: number): number | null { return this.lanes[pane]?.current?.bitmap ? this.lanes[pane]!.current!.index : null; }
   get workerCount() { return this.lanes.reduce((n, l) => n + (l.current ? 1 : 0) + (l.pending?.slot ? 1 : 0), 0); }
   configure(clock: MultiViewClock) {
     if (this.closed) return;
-    this.revision++; this.clock = clock;
+    this.revision++; this.clock = clock; this.policy = clock.plan;
     for (const l of this.lanes) { this.cancel(l); l.old?.close(); l.old = null; l.retryAt = 0; l.errorKey = ''; }
     while (this.lanes.length > clock.plan.count) this.release(this.lanes.pop()!);
     while (this.lanes.length < clock.plan.count) this.lanes.push(lane());
@@ -65,14 +86,18 @@ export class MultiViewRuntime {
     this.host.changed();
   }
   private render(slot: Slot, frame: MultiViewLaneFrame, time: number, future: boolean) {
-    if (slot.dead || slot.busy || (!future && !this.visible)) return;
+    // Hidden views dispatch nothing, preloads included: a pane whose worker finishes loading while hidden renders on the next visible tick.
+    if (slot.dead || slot.busy || !this.visible) return;
     const key = `${this.revision}:${time}:${this.playing}:${future}:${this.host.renderKey?.(slot.index, frame.pane) ?? ''}`;
     if (slot.key === key) return;
-    slot.busy = true; slot.sent = this.now; const revision = this.revision;
+    slot.busy = true; slot.sent = this.now; const revision = this.revision, sent = this.stamp(), measured = this.playing && !future;
     Promise.resolve().then(() => slot.renderer.render({ lane: frame, time, playing: this.playing && !future, future, revision })).then(bitmap => {
       slot.busy = false;
       if (this.closed || slot.dead || revision !== this.revision) { bitmap.close(); return; }
-      slot.bitmap?.close(); slot.bitmap = bitmap; slot.revision = revision; slot.key = key; this.host.changed();
+      const done = this.stamp();
+      slot.bitmap?.close(); slot.bitmap = bitmap; slot.revision = revision; slot.key = key; slot.accepted = done;
+      if (measured && this.visible) this.host.measured?.(slot.index, frame.pane, Math.max(0, done - sent));
+      this.host.changed();
     }).catch(error => { slot.busy = false; if (!slot.dead && !this.closed) this.failure(slot.index, frame.pane, String(error)); });
   }
   private failure(index: number, pane: number, message: string) {
@@ -89,7 +114,7 @@ export class MultiViewRuntime {
     l.pending = p; this.inFlight = true;
     Promise.resolve().then(() => this.host.create(p.index, pane, p.abort.signal)).then(renderer => {
       if (this.closed || p.dead || p.abort.signal.aborted) { renderer.dispose(); return; }
-      const slot: Slot = { renderer, index: p.index, bitmap: null, busy: false, revision: this.revision, sent: this.now, dead: false, key: '' }; p.slot = slot;
+      const slot: Slot = { renderer, index: p.index, bitmap: null, busy: false, revision: this.revision, sent: this.now, dead: false, key: '', accepted: 0 }; p.slot = slot;
       this.render(slot, p.frame, Math.max(this.lastTime, p.frame.phase.start), p.frame.phase.start > this.lastTime);
     }).catch(error => { if (!p.dead && !this.closed) this.failure(p.index, pane, String(error)); }).finally(() => { this.inFlight = false; });
   }
@@ -98,7 +123,7 @@ export class MultiViewRuntime {
     if (!p?.slot?.bitmap || p.slot.revision !== this.revision || p.index !== frame.phase.index) return;
     l.old?.close(); l.old = l.current?.bitmap ?? null; l.oldIndex = l.current?.index ?? -1;
     this.stop(l.current, false); l.current = p.slot; l.pending = null;
-    const phase = frame.phase, plan = this.clock.plan;
+    const phase = frame.phase, plan = this.policy;
     const fade = planFade(plan.fade, pickFade(plan.fade, phase.ordinal, frame.clock.timing.seed), { bpm: phase.bpm, beatsPerBar: phase.beatsPerBar, grid: frame.clock.grid, boundaryBeat: frame.clock.grid.beatAt(phase.start), capSeconds: phase.duration });
     l.start = phase.start; l.duration = fade.seconds; l.seed = multiViewTransitionSeed(plan.timing.seed, frame.pane, phase.ordinal);
     if (time >= l.start + l.duration || plan.panes[frame.pane]?.transition === 'cut') { l.old?.close(); l.old = null; }
@@ -140,7 +165,7 @@ export class MultiViewRuntime {
     return this.lanes.map((l, pane) => {
       const plate = (bitmap: MultiViewBitmap | null | undefined, index: number) => bitmap ? { image: bitmap as CanvasImageSource, width: bitmap.width, height: bitmap.height, smooth: this.host.smooth?.(index) ?? true } : null;
       return { current: plate(l.current?.bitmap, l.current?.index ?? -1), outgoing: plate(l.old, l.oldIndex),
-        progress: l.duration > 0 ? Math.max(0, Math.min(1, (time - l.start) / l.duration)) : 1, seed: l.seed, transition: this.clock.plan.panes[pane]!.transition };
+        progress: l.duration > 0 ? Math.max(0, Math.min(1, (time - l.start) / l.duration)) : 1, seed: l.seed, transition: this.policy.panes[pane]?.transition ?? 'cut' };
     });
   }
   close() { if (this.closed) return; this.closed = true; this.revision++; for (const l of this.lanes) this.release(l); }

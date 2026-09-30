@@ -59,22 +59,48 @@ export function drawMultiViewBorder(c: Context, box: MultiViewRect, border: Mult
   }
   c.globalAlpha = 1;
 }
-interface Cache { width: number; height: number; surfaces: readonly [Surface, Surface, Surface]; transition: AvsTransition | null; key: string }
-/** Create surfaces lazily through the host. At most three pane-sized caches per pane, disposed on close or shrink. */
+interface Cache { width: number; height: number; surfaces: readonly [Surface, Surface, Surface]; transition: AvsTransition | null; key: string; owned: Surface[] }
+/** Byte ceiling for numeric-transition scratch storage across all panes (RGBA, modelled below). */
+export const MULTI_VIEW_SCRATCH_BYTES = 96 * 1024 * 1024;
+/** Surfaces modelled per active numeric fade: old, new and output planes plus the transition's own mask and tile. */
+export const MULTI_VIEW_SCRATCH_PLANES = 5;
+/**
+ * Create surfaces lazily through the host, only for panes whose numeric (AVS-style) fade is running. A pane's cache is released on the
+ * first frame its fade is no longer running, and the planes of every running fade share MULTI_VIEW_SCRATCH_BYTES: a fade whose full-size
+ * planes would not fit renders at a reduced scratch resolution and is scaled into its pane.
+ */
 export class MultiViewCompositor {
   private readonly cache = new Map<number, Cache>();
+  private active = 1;
   constructor(private readonly createCanvas: (width: number, height: number) => Surface) {}
-  clear() { this.cache.clear(); }
+  clear() { for (const pane of [...this.cache.keys()]) this.release(pane); }
+  /** Modelled bytes currently retained by scratch planes. */
+  get scratchBytes() { let bytes = 0; for (const c of this.cache.values()) bytes += c.width * c.height * 4 * MULTI_VIEW_SCRATCH_PLANES; return bytes; }
+  private release(pane: number) {
+    const cache = this.cache.get(pane); if (!cache) return;
+    // Zero-size the planes so the browser can free their backing stores even if a reference lingers elsewhere.
+    for (const surface of [...cache.surfaces, ...cache.owned]) { surface.width = 0; surface.height = 0; }
+    cache.transition = null; this.cache.delete(pane);
+  }
   private scratch(pane: number, width: number, height: number): Cache {
-    const w = Math.max(1, Math.round(width)), h = Math.max(1, Math.round(height));
+    let w = Math.max(1, Math.round(width)), h = Math.max(1, Math.round(height));
+    const budget = MULTI_VIEW_SCRATCH_BYTES / Math.max(1, this.active), need = w * h * 4 * MULTI_VIEW_SCRATCH_PLANES;
+    if (need > budget) { const k = Math.sqrt(budget / need); w = Math.max(1, Math.floor(w * k)); h = Math.max(1, Math.floor(h * k)); }
     let cache = this.cache.get(pane);
     if (!cache || cache.width !== w || cache.height !== h) {
-      cache = { width: w, height: h, surfaces: [this.createCanvas(w, h), this.createCanvas(w, h), this.createCanvas(w, h)], transition: null, key: '' };
+      this.release(pane);
+      cache = { width: w, height: h, surfaces: [this.createCanvas(w, h), this.createCanvas(w, h), this.createCanvas(w, h)], transition: null, key: '', owned: [] };
       this.cache.set(pane, cache);
     }
     return cache;
   }
-  private pane(c: Context, b: MultiViewRect, options: MultiViewPane, image: MultiViewPaneImage, pane: number, reduced: boolean) {
+  /** True when this pane image needs numeric-transition scratch planes this frame. */
+  private numeric(image: MultiViewPaneImage | undefined, options: MultiViewPane | undefined, reduced: boolean) {
+    if (!image?.current || !image.outgoing || !options) return false;
+    const progress = image.progress === undefined ? 1 : unit(image.progress), mode = image.transition ?? options.transition;
+    return progress > 0 && progress < 1 && typeof mode === 'number' && !(reduced && mode !== 15);
+  }
+  private pane(c: Context, b: MultiViewRect, options: MultiViewPane, image: MultiViewPaneImage, pane: number, reduced: boolean, used?: Set<number>) {
     if (!image.current || b.width <= 0 || b.height <= 0) return;
     c.save(); clip(c, b); c.fillStyle = '#000'; c.fillRect(b.x, b.y, b.width, b.height);
     const current = image.current, old = image.outgoing, progress = image.progress === undefined ? 1 : unit(image.progress), t = transitionProgress(progress);
@@ -84,10 +110,10 @@ export class MultiViewCompositor {
     if (!old || progress >= 1 || mode === 'cut') paint(current);
     else if (progress <= 0) paint(old);
     else if (typeof mode === 'number') {
-      const cache = this.scratch(pane, b.width, b.height), local = { x: 0, y: 0, width: cache.width, height: cache.height };
+      const cache = this.scratch(pane, b.width, b.height), local = { x: 0, y: 0, width: cache.width, height: cache.height }; used?.add(pane);
       for (const [i, plate] of [old, current].entries()) { const ctx = cache.surfaces[i]!.getContext('2d') as Context; ctx.clearRect(0, 0, local.width, local.height); ctx.fillStyle = '#000'; ctx.fillRect(0, 0, local.width, local.height); fit(ctx, plate, local, options.fit); }
       const seed = image.seed ?? 1, key = `${mode}:${seed}:${reduced}`;
-      if (cache.key !== key) { cache.key = key; cache.transition = new AvsTransition(mode, { seed, createCanvas: () => this.createCanvas(1, 1), context: { reducedMotion: reduced, beatsTotal: image.env?.beatsTotal ?? 4, boundary: 0, nervPair: false }, smooth: current.smooth !== false }); }
+      if (cache.key !== key) { const owned = cache.owned; for (const surface of owned.splice(0)) { surface.width = 0; surface.height = 0; } cache.key = key; cache.transition = new AvsTransition(mode, { seed, createCanvas: () => { const surface = this.createCanvas(1, 1); owned.push(surface); return surface; }, context: { reducedMotion: reduced, beatsTotal: image.env?.beatsTotal ?? 4, boundary: 0, nervPair: false }, smooth: current.smooth !== false }); }
       cache.transition!.draw(cache.surfaces[2].getContext('2d') as Context, cache.surfaces[0], cache.surfaces[1], progress, local.width, local.height, normalizeEnv({ ...image.env, reducedMotion: reduced }));
       c.drawImage(cache.surfaces[2], b.x, b.y, b.width, b.height);
     } else if (mode === 'dissolve' || mode === 'morph') { paint(old); c.globalAlpha = t; paint(current); c.globalAlpha = 1; }
@@ -111,7 +137,8 @@ export class MultiViewCompositor {
     const previous = input.previousLayout ? multiViewPixelRects(input.previousLayout, input.previousCount ?? input.count, input.width, input.height, input.gutter) : rects;
     const progress = input.layoutProgress === undefined ? 1 : unit(input.layoutProgress), t = transitionProgress(progress), mode = input.reducedMotion ? 'dissolve' : input.layoutMotion ?? 'morph';
     c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.globalAlpha = 1; c.fillStyle = '#000'; c.fillRect(0, 0, input.width, input.height);
-    const boxes: MultiViewRect[] = [];
+    const boxes: MultiViewRect[] = [], used = new Set<number>();
+    this.active = 0; for (let i = 0; i < rects.length; i++) if (this.numeric(input.images[i], input.panes[i], input.reducedMotion)) this.active++;
     for (let i = 0; i < rects.length; i++) {
       const target = rects[i]!, from = previous[i] ?? { ...target, width: 0, height: 0 }, options = input.panes[i], image = input.images[i];
       let b = mode === 'morph' && progress < 1 ? lerp(from, target, t) : target;
@@ -127,10 +154,11 @@ export class MultiViewCompositor {
           c.translate(face.x + face.width / 2, face.y + face.height / 2); c.scale(mode === 'flip-x' ? scale : 1, mode === 'flip-y' ? scale : 1); c.translate(-face.x - face.width / 2, -face.y - face.height / 2); this.pane(c, face, options, { ...image, outgoing: null }, i, input.reducedMotion); }
         else this.pane(c, target, options, { ...image, outgoing: null }, i, input.reducedMotion);
         c.restore();
-      } else this.pane(c, b, options, image, i, input.reducedMotion);
+      } else this.pane(c, b, options, image, i, input.reducedMotion, used);
       c.save(); clip(c, b); drawMultiViewBorder(c, b, input.border, input.beat + i / 4, input.level, input.reducedMotion); c.restore();
     }
-    for (const pane of this.cache.keys()) if (pane >= rects.length) this.cache.delete(pane);
+    // Finished (or never started) numeric fades and removed panes release their planes at once.
+    for (const pane of [...this.cache.keys()]) if (pane >= rects.length || !used.has(pane)) this.release(pane);
     c.restore(); return boxes;
   }
 }

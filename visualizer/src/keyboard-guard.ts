@@ -58,6 +58,30 @@ export function isTextEntry(target: EventTarget | null | undefined): boolean {
   return !NON_TEXT_INPUT_TYPES.has(type);
 }
 
+/** ARIA roles whose element takes Space/Enter activation itself. */
+const ACTIVATION_ROLES: ReadonlySet<string> = new Set([
+  'button', 'checkbox', 'radio', 'switch', 'tab', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'option', 'link', 'slider', 'spinbutton', 'combobox', 'textbox',
+]);
+
+/**
+ * Does Space (or Enter) on this target belong to the control rather than to a page shortcut such as play/pause?
+ *
+ * True for every text entry (see `isTextEntry`), every `<input>` (checkboxes and buttons included), buttons, links with an href,
+ * `<summary>`, and elements with an activation role. Shared shortcut handlers call this before claiming Space, so a focused
+ * embedded button is pressed instead of toggling playback.
+ */
+export function isInteractiveTarget(target: EventTarget | null | undefined): boolean {
+  if (isTextEntry(target)) return true;
+  if (!target || typeof target !== 'object') return false;
+  const node = target as ElementLike & { readonly role?: unknown; readonly href?: unknown; getAttribute?(name: string): string | null };
+  const tag = typeof node.tagName === 'string' ? node.tagName.toUpperCase() : '';
+  if (tag === 'INPUT' || tag === 'BUTTON' || tag === 'SUMMARY' || tag === 'SELECT' || tag === 'TEXTAREA') return true;
+  if (tag === 'A' && (typeof node.href === 'string' ? node.href !== '' : !!node.getAttribute?.('href'))) return true;
+  let role: unknown = node.role;
+  if (typeof role !== 'string' && typeof node.getAttribute === 'function') role = node.getAttribute('role');
+  return typeof role === 'string' && ACTIVATION_ROLES.has(role.toLowerCase());
+}
+
 /** The part of a `Node` the guard needs: is the event target inside this panel? */
 export interface KeyboardGuardRoot {
   contains(other: Node | null): boolean;
