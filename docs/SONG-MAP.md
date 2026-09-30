@@ -57,7 +57,32 @@ track change reject late messages by job id in both directions.
 already evaluated. `sectionAt(t)` (section, index, progress), `roleAt`, `nextBoundary(t, 'section' | 'bar' | 'beat')`
 (strictly after `t`), `beatAt` / `timeOfBeat` and `barAt` / `timeOfBar` (continuous, interpolated between explicit
 timestamps, extrapolated outside the grid), `barPosition`, `bpmAt`, `nearestBeat`, `covered`, `revision`, and
-`SongMapClock.progress(t, start, end)` (the interval-counter rule). The map carries no meter; `beatInBar` assumes 4.
+`SongMapClock.progress(t, start, end)` (the interval-counter rule). `beatsPerBar` is the map's optional meter (see "Meter"):
+`barPosition().beatInBar` runs from 0 to `beatsPerBar`, and without downbeats a bar is `beatsPerBar` beats.
+
+### Meter (beats per bar)
+
+`SongMapJSON.beatsPerBar` is optional and additive: absent means 4, and every reader must keep working without it (older cached
+maps, the live fallback and stock 4/4 analysis do not carry it). Only integers from 2 to 12 are honoured (`beatsPerBarOf` in
+`src/song-map/meter.ts`); `validateSongMap` rejects anything else. `confidence.meter` (optional, 0..1) says how decisive the
+analyzer's estimate was. The meter changes nothing about beats; it only says how many beats lie between two downbeats.
+
+The analyzer's downbeat stage (`rhythm.ts`) estimates 3 versus 4 (other meters stay on 4): the per-beat accent (structural change plus
+half a standardised kick strength) is autocorrelated, pooled over the tempo regions, and the meter is 3 only when the lags 3, 6, 9 and 15
+clearly beat the lags 4, 8, 16 and 20 (strength above 0.15 and 1.6 times the 4-beat score; 12 and 24 are shared and ignored). Short or
+weak evidence (under 48 beats) is 4. The bar phase then uses the chosen meter (snare evidence on the meter's backbeats, see below); for 4
+the computation is exactly the old one. The estimate is one value for the whole track, so a track that changes meter keeps the majority.
+`SONG_MAP_ANALYZER` was bumped to `aaavs-song-map-cpu-2`, so cached maps of the earlier analyzer are scanned again once.
+
+Backbeats (`backbeats(n)`, beat indices inside the bar, 0 is the downbeat) are used for the snare evidence and for the live fallback's
+predicted snares: 2/4 and 6/8 counted in two: beat 2; 3/4: beats 2 and 3; 4/4: beats 2 and 4; 5/4 (3+2): beats 2 and 4; 6/8 counted in
+six: beat 4; 7/8 (2+2+3): beats 3 and 5; 9/8: beats 4 and 7; 8, 10, 11, 12: beats n/4 and 3n/4 rounded. The kick is on every beat
+in every meter, strongest on the downbeat.
+
+The show engine's live fallback (`src/show/live.ts`) takes `beatsPerBar` in its clock: downbeats every `beatsPerBar` beats, the neutral
+arrangement in bars of that length and the predicted onsets above; `presetWindow` passes the host ClockGrid's `beatsPerBar` (the host
+allows 1..16; 1 and above 12 read as 4 here), and the window key includes it. `AudioData.beatsPerBar` is what plates read; the NERV bar
+and beat read-outs use it. Plates that hard-code four beats inside a bar in other ways are not audited.
 
 ### Cache
 
@@ -111,7 +136,7 @@ library server ops are covered by `tools/check-standalone-library.mjs`.
 track generated block by block.
 
 Accuracy on synthetic ground truth (`tools/song-map-fixtures.ts`: drums, bass, pads, vocal-like chops, risers and
-snare rolls arranged intro / groove / break / build / drop / breakdown / build / drop / outro). Thresholds: tempo
+snare rolls arranged intro / groove / break / build / drop / breakdown / build / drop / outro). Every fixture, the 3/4 waltz included (`waltz-126`), must also read the right `beatsPerBar` (absent for 4/4). Thresholds: tempo
 within 1 %, beat and downbeat F-measure at least 0.95 (70 ms), section boundaries within one bar, role accuracy at
 least 0.85, drum onset F at least 0.6, bass pitch at least 0.55. The fixtures and the heuristics were developed
 together, so these numbers show that the machinery works on clean, regular music, not how it performs on real songs.
@@ -121,5 +146,7 @@ The vocal-proxy onset F-measure is reported, not gated (0.04 to 0.40): it is wea
 
 Real music (no annotated corpus was available); the browser Player end to end (file picker, `decodeAudioData`,
 the bundled worker in a browser); the MPC native bridge; behaviour of a live map against real playback timing;
-files over 15 minutes in the browser Player (live map only); meters other than 4/4; half/double-time ambiguity on
-real material; stock AAAVS mirroring of the new tools.
+files over 15 minutes in the browser Player (live map only); the 3-vs-4 meter estimate on anything but the one synthetic waltz fixture (a
+scratch run at 150 and 180 BPM also found 3, but is not gated); half/double-time ambiguity on
+real material (and meters other than 3 and 4, and 3/4 below about 100 BPM, where the tempo stage can lock to double time as it can on any
+slow track with an ambiguous snare pattern); stock AAAVS mirroring of the new tools.

@@ -14,7 +14,7 @@ import { AudioData } from './show/audio.ts';
 import { PW, PH, SCALE } from './show/gl.ts';
 import { setAssetBase } from './show/canvas.ts';
 import { planShow, type PlannedPlate } from './show/plan.ts';
-import { validateShowRequest, type ShowAudioMessage, type ShowInitMessage, type ShowPlanEntry, type ShowRenderMessage } from './show/protocol.ts';
+import { validateShowRequest, type ShowPackMessage, type ShowAudioMessage, type ShowInitMessage, type ShowPlanEntry, type ShowRenderMessage } from './show/protocol.ts';
 import { LiveAudioData } from './show/live.ts';
 import { presetWindow, type PresetEntry } from './show/preset-window.ts';
 import { loadEngineFonts } from './show/engine.ts';
@@ -26,6 +26,7 @@ import { ShowScaleSwitch, showScaleFor, SWITCH_FRAMES } from './show/scale-switc
 import { NERV_SCENE_CLASSES, NERV_SHOW, type NervPlateId } from './shows/nerv/index.ts';
 import { validateSongMap } from './song-map/validate.ts';
 import { synthesizeWave } from './song-map/synth-wave.ts';
+import { receiveShowPack } from './show/pack-registry.ts';
 
 const scope = self as unknown as {
   onmessage: ((event: MessageEvent<unknown>) => void) | null;
@@ -211,6 +212,12 @@ const INNER = params.get('inner') === '1';
 interface Inner { worker: Worker; scale: number; ready: boolean; generation: number }
 let active: Inner | null = null, pending: Inner | null = null, lastLoad: Extract<AvsWorkerRequest, { type: 'load' }> | null = null;
 const scaleSwitch = new ShowScaleSwitch(SCALE);
+let lastPack: ShowPackMessage | null = null;
+/** A copy of a show-pack message (the original's buffers stay with this worker's registry). */
+function sendPack(w: Worker, m: ShowPackMessage) {
+  const manifest = m.manifest?.slice(0), atlases = m.atlases ? Object.fromEntries(Object.entries(m.atlases).map(([k, v]) => [k, v.slice(0)])) : undefined;
+  w.postMessage({ ...m, manifest, atlases }, [...(manifest ? [manifest] : []), ...Object.values(atlases ?? {})]);
+}
 let pendingAway = 0; // consecutive requests that no longer want the pending copy's scale
 
 function startInner(scale: number) {
@@ -230,6 +237,7 @@ function startInner(scale: number) {
     post(d, [...(d.bitmap ? [d.bitmap] : []), ...(d.pcm ? [d.pcm] : [])]);
   };
   w.onerror = () => { if (rec === pending) { pending = null; scaleSwitch.settle(active?.scale ?? SCALE); } };
+  if (lastPack) sendPack(w, lastPack);
   const preset = lastLoad.preset.slice(0);
   w.postMessage({ ...lastLoad, preset }, [preset]);
   pending = rec;
@@ -281,6 +289,12 @@ scope.onmessage = ({ data }) => {
     try {
       const m = validateShowRequest(data);
       gen = m.generation;
+      if (m.type === 'show-pack') { // host-wide, never dropped by a show generation; copies at another scale get it too
+        lastPack = m;
+        for (const i of [active, pending]) if (i) sendPack(i.worker, m);
+        debug(`asset pack ${(await receiveShowPack(m)).status}`);
+        return;
+      }
       if (m.type === 'show-init') { generation = m.generation; await init(m); return; }
       if (m.generation !== generation) return;
       if (m.type === 'show-audio') { pushAudio(m); return; }

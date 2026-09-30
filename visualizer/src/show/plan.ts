@@ -15,6 +15,7 @@
 //     first intro part gets the intro plate and the last outro part the outro plate.
 //  5. Every plate window starts and ends on a downbeat (hard cuts, including on drop downbeats) and
 //     carries a bar map from its home bars, so its story resolves on the window's last bar.
+import { beatsPerBarOf } from '../song-map/meter.ts';
 import type { SectionRole, SongMapJSON } from '../song-map/types.ts';
 import type { BarMap } from './bar-map.ts';
 
@@ -51,13 +52,13 @@ export interface PlannedPlate {
 
 const DEFAULT_MAX: Record<SectionRole, number> = { intro: 16, groove: 8, break: 8, build: 8, drop: 12, breakdown: 8, outro: 16 };
 
-/** A song's downbeat grid: the map's downbeats, else every 4th beat, else the tempo from 0. */
+/** A song's downbeat grid: the map's downbeats, else every beatsPerBar-th beat (4 unless the map says otherwise), else the tempo from 0. */
 export function downbeatGrid(map: SongMapJSON): number[] {
   if (map.downbeats && map.downbeats.length >= 2) return map.downbeats;
-  const bar = 240 / (map.bpm > 0 ? map.bpm : 120);
+  const perBar = beatsPerBarOf(map.beatsPerBar), bar = (perBar * 60) / (map.bpm > 0 ? map.bpm : 120);
   if (map.beats && map.beats.length >= 8) {
     const out: number[] = [];
-    for (let i = 0; i < map.beats.length; i += 4) out.push(map.beats[i]!);
+    for (let i = 0; i < map.beats.length; i += perBar) out.push(map.beats[i]!);
     return out;
   }
   const out: number[] = [];

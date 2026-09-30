@@ -5,8 +5,10 @@
 // constant-tempo regions, each region gets a constant grid fitted to the onset envelope and
 // refined by least squares on kick/snare attacks, the metrical octave is chosen from where
 // kicks and snares fall, and regions are joined where the score switches from one grid to the next.
-// Downbeats use the upstream "most change across the grid" rule plus backbeat evidence.
+// Downbeats use the upstream "most change across the grid" rule plus backbeat evidence. The meter (3 or 4 beats per
+// bar; anything else reads as 4) is estimated from the periodicity of the same per-beat accent evidence.
 import { median, percentile } from './dsp.ts';
+import { backbeats } from './meter.ts';
 import type { SongMapFeature } from './types.ts';
 
 export const MIN_BPM = 70;
@@ -36,7 +38,9 @@ export interface RhythmResult {
   readonly downbeats: number[];
   readonly bar0?: number;
   readonly regions: TempoRegion[];
-  readonly confidence: { tempo: number; downbeat: number };
+  /** Beats per bar: 3 when the accents repeat every three beats, else 4 (the default when nothing is decisive). */
+  readonly beatsPerBar: number;
+  readonly confidence: { tempo: number; downbeat: number; meter: number };
   /** Per-beat structural change score (aligned with `beats`), reused by section analysis. */
   readonly change: number[];
 }
@@ -259,9 +263,11 @@ function prefix(values: Float32Array, a: number, b: number): Float64Array {
 }
 
 interface PhaseResult { phase: number; confidence: number; change: number[] }
+/** Per-beat evidence of one tempo region: structural change and the strength of kicks and snares at each beat. */
+interface BarFeatures { readonly change: number[]; readonly kick: number[]; readonly snare: number[] }
 
-/** Bar phase (mod 4) of a run of beats: structural change, backbeat snares and kick emphasis. */
-function barPhase(input: RhythmInput, a: number, b: number, beats: number[]): PhaseResult {
+/** Structural change, kick and snare strength at every beat of a run of beats (aligned with `beats`). */
+function barFeatures(input: RhythmInput, a: number, b: number, beats: number[]): BarFeatures {
   const { fps, features } = input;
   const names: SongMapFeature[] = ['rms', 'low', 'drums', 'bass', 'other', 'high', 'vocal'];
   const sums = names.map(k => prefix(features[k], a, b));
@@ -303,19 +309,81 @@ function barPhase(input: RhythmInput, a: number, b: number, beats: number[]): Ph
     for (let j = lo; j < list.length && list[j]![0] <= t + .06; j++) s = Math.max(s, list[j]![1]);
     return s;
   };
-  const kick = beats.map(t => strengthNear(input.kicks, t)), snare = beats.map(t => strengthNear(input.snares, t));
-  const mean = (x: number[], ph: number) => { let s = 0, c = 0; for (let i = ph; i < x.length; i += 4) if (Number.isFinite(x[i]!)) { s += x[i]!; c++; } return c ? s / c : 0; };
-  const z = (v: number[]) => { const m = v.reduce((s, x) => s + x, 0) / v.length; const sd = Math.sqrt(v.reduce((s, x) => s + (x - m) ** 2, 0) / v.length) + 1e-9; return v.map(x => (x - m) / sd); };
-  const phases = [0, 1, 2, 3];
+  return { change, kick: beats.map(t => strengthNear(input.kicks, t)), snare: beats.map(t => strengthNear(input.snares, t)) };
+}
+
+const zScores = (v: number[]) => { const m = v.reduce((s, x) => s + x, 0) / v.length; const sd = Math.sqrt(v.reduce((s, x) => s + (x - m) ** 2, 0) / v.length) + 1e-9; return v.map(x => (x - m) / sd); };
+
+/** Bar phase (mod `meter`) of a run of beats: structural change, backbeat snares and kick emphasis. */
+function barPhase(f: BarFeatures, meter: number): PhaseResult {
+  const { change, kick, snare } = f;
+  const mean = (x: number[], ph: number) => { let s = 0, c = 0; for (let i = ph; i < x.length; i += meter) if (Number.isFinite(x[i]!)) { s += x[i]!; c++; } return c ? s / c : 0; };
+  const phases = Array.from({ length: meter }, (_, i) => i);
+  const z = zScores;
   const zc = z(phases.map(ph => mean(change, ph)));
-  const zs = z(phases.map(ph => mean(snare, (ph + 1) % 4) + mean(snare, (ph + 3) % 4) - mean(snare, ph) - mean(snare, (ph + 2) % 4)));
-  const zk = z(phases.map(ph => mean(kick, ph) - mean(kick, (ph + 2) % 4) * .5));
+  let zs: number[], zk: number[];
+  if (meter === 4) {
+    zs = z(phases.map(ph => mean(snare, (ph + 1) % 4) + mean(snare, (ph + 3) % 4) - mean(snare, ph) - mean(snare, (ph + 2) % 4)));
+    zk = z(phases.map(ph => mean(kick, ph) - mean(kick, (ph + 2) % 4) * .5));
+  } else {
+    // Generic meters: snares on the meter's backbeats against the other beats of the bar; a kick on the downbeat against the rest.
+    const back = backbeats(meter), others = phases.filter(o => !back.includes(o));
+    const avg = (x: number[], ph: number, offsets: readonly number[]) => offsets.reduce((s, o) => s + mean(x, (ph + o) % meter), 0) / Math.max(1, offsets.length);
+    const rest = phases.filter(o => o !== 0);
+    zs = z(phases.map(ph => avg(snare, ph, back) - avg(snare, ph, others)));
+    zk = z(phases.map(ph => mean(kick, ph) - avg(kick, ph, rest) * .5));
+  }
   const snareEvidence = snare.some(s => s > 0), kickEvidence = kick.some(s => s > 0);
   const scores = phases.map(ph => zc[ph]! + (snareEvidence ? .5 * zs[ph]! : 0) + (kickEvidence ? .25 * zk[ph]! : 0));
   const order = [...phases].sort((x, y) => scores[y]! - scores[x]!);
   const margin = scores[order[0]!]! - scores[order[1]!]!;
   return { phase: order[0]!, confidence: Math.max(0, Math.min(1, margin / 1.5)), change };
 }
+
+/** Sums of accent products at each lag over several runs of beats (autocorrelation pooled across tempo regions). */
+interface AccentLags { readonly product: Float64Array; readonly energy: Float64Array }
+const METER_MAX_LAG = 20;
+function accentLags(f: BarFeatures): AccentLags {
+  // One accent per beat: standardised structural change plus half a standardised kick strength. Missing values (the first beat of a run) are 0.
+  const n = f.change.length, finite = f.change.map(x => Number.isFinite(x));
+  const c = f.change.map(x => (Number.isFinite(x) ? x : 0));
+  const zc = zScores(c.filter((_, i) => finite[i]));
+  const a = new Float64Array(n); let k = 0;
+  const zk = f.kick.some(x => x > 0) ? zScores(f.kick) : f.kick.map(() => 0);
+  for (let i = 0; i < n; i++) a[i] = (finite[i] ? zc[k++]! : 0) + .5 * zk[i]!;
+  let mean = 0; for (let i = 0; i < n; i++) mean += a[i]!; mean /= Math.max(1, n);
+  for (let i = 0; i < n; i++) a[i]! -= mean;
+  const product = new Float64Array(METER_MAX_LAG + 1), energy = new Float64Array(METER_MAX_LAG + 1);
+  for (let lag = 1; lag <= METER_MAX_LAG; lag++) {
+    if (n <= lag) continue;
+    let p = 0, e = 0;
+    for (let i = lag; i < n; i++) { p += a[i]! * a[i - lag]!; e += a[i]! * a[i]!; }
+    product[lag] = p; energy[lag] = e;
+  }
+  return { product, energy };
+}
+
+/** Bars of three beats when accents repeat every three beats (lags 3, 6, 9, 15) clearly more than every four (4, 8, 16, 20); 12 and 24 are
+ * shared multiples and left out. Anything else, including weak or short evidence, is four beats: the default and the conservative answer. */
+export function estimateMeter(runs: readonly BarFeatures[]): { meter: 3 | 4; confidence: number; s3: number; s4: number; beats: number } {
+  const product = new Float64Array(METER_MAX_LAG + 1), energy = new Float64Array(METER_MAX_LAG + 1);
+  let beats = 0;
+  for (const run of runs) {
+    if (run.change.length < 24) continue; // too short for any periodicity claim
+    const lags = accentLags(run);
+    for (let lag = 1; lag <= METER_MAX_LAG; lag++) { product[lag]! += lags.product[lag]!; energy[lag]! += lags.energy[lag]!; }
+    beats += run.change.length;
+  }
+  const at = (lag: number) => (energy[lag]! > 1e-9 ? product[lag]! / energy[lag]! : 0);
+  const s3 = [3, 6, 9, 15].reduce((s, l) => s + at(l), 0) / 4, s4 = [4, 8, 16, 20].reduce((s, l) => s + at(l), 0) / 4;
+  if (beats < 48) return { meter: 4, confidence: 0, s3, s4, beats };
+  const threeWins = s3 > METER_MIN_STRENGTH && s3 > METER_MARGIN * Math.max(s4, 0.02);
+  const chosen = threeWins ? s3 : s4, other = threeWins ? s4 : s3;
+  const decisive = chosen > 0 ? Math.max(0, (chosen - Math.max(0, other)) / (chosen + Math.max(0, other) + 1e-9)) : 0;
+  return { meter: threeWins ? 3 : 4, confidence: Math.round(Math.min(1, decisive) * Math.min(1, Math.max(0, chosen) / .3) * 1000) / 1000, s3, s4, beats };
+}
+const METER_MIN_STRENGTH = .15;
+const METER_MARGIN = 1.6;
 
 function analyzeIsland(input: RhythmInput, a: number, b: number) {
   const { fps } = input, n = b - a;
@@ -377,33 +445,46 @@ function analyzeIsland(input: RhythmInput, a: number, b: number) {
     conf += Math.max(0, Math.min(1, (on - off) / (on + 1e-9) * 1.5)) * (s1 - s0); weight += s1 - s0;
   }
   const absolute = beats.map(t => t + origin).filter(t => t >= 0 && t <= input.duration);
-  // Bar phase per tempo region.
-  const downbeats: number[] = [], change: number[] = [];
-  let downConf = 0, downWeight = 0;
+  // Per-beat evidence per tempo region; the bar phase waits for the meter, which is estimated over the whole track.
+  const runs: { beats: number[]; features: BarFeatures }[] = [];
   for (let r = 0; r < regions.length; r++) {
     const from = regionStarts[r]!, to = regionStarts[r + 1] ?? beats.length;
     const regionBeats = beats.slice(from, to).map(t => t + origin);
     if (!regionBeats.length) continue;
-    const phase = barPhase(input, a, b, regionBeats);
-    for (let i = phase.phase; i < regionBeats.length; i += 4) downbeats.push(regionBeats[i]!);
-    change.push(...phase.change);
-    downConf += phase.confidence * regionBeats.length; downWeight += regionBeats.length;
+    runs.push({ beats: regionBeats, features: barFeatures(input, a, b, regionBeats) });
   }
   return {
-    beats: absolute, downbeats: downbeats.filter(t => t >= 0 && t <= input.duration), change: change.slice(0, absolute.length),
+    runs, beats: absolute, span: t1, tempoConfidence: weight ? conf / weight : 0,
     regions: regions.map(r => ({ start: round4(origin + r.a / fps), end: round4(origin + r.b / fps), bpm: r.bpm })),
-    tempoConfidence: weight ? conf / weight : 0, downbeatConfidence: downWeight ? downConf / downWeight : 0, span: t1,
+    /** Bar phase per tempo region for a meter: downbeats (every `meter` beats from the best phase) and the change series. */
+    bars(meter: number) {
+      const downbeats: number[] = [], change: number[] = [];
+      let downConf = 0, downWeight = 0;
+      for (const run of runs) {
+        const phase = barPhase(run.features, meter);
+        for (let i = phase.phase; i < run.beats.length; i += meter) downbeats.push(run.beats[i]!);
+        change.push(...phase.change);
+        downConf += phase.confidence * run.beats.length; downWeight += run.beats.length;
+      }
+      return { downbeats: downbeats.filter(t => t >= 0 && t <= input.duration), change: change.slice(0, absolute.length), downbeatConfidence: downWeight ? downConf / downWeight : 0 };
+    },
   };
 }
 
 export function analyzeRhythm(input: RhythmInput): RhythmResult {
   const beats: number[] = [], downbeats: number[] = [], change: number[] = [], regions: TempoRegion[] = [];
   let tc = 0, dc = 0, w = 0;
+  const islands: NonNullable<ReturnType<typeof analyzeIsland>>[] = [];
   for (const [a, b] of input.islands) {
     const result = analyzeIsland(input, a, b);
-    if (!result) continue;
-    beats.push(...result.beats); downbeats.push(...result.downbeats); change.push(...result.change); regions.push(...result.regions);
-    tc += result.tempoConfidence * result.span; dc += result.downbeatConfidence * result.span; w += result.span;
+    if (result) islands.push(result);
+  }
+  // One meter for the whole track (every reader takes a single `beatsPerBar`): the accent periodicity pooled over every tempo region.
+  const meter = estimateMeter(islands.flatMap(island => island.runs.map(run => run.features)));
+  for (const island of islands) {
+    const result = island.bars(meter.meter);
+    beats.push(...island.beats); downbeats.push(...result.downbeats); change.push(...result.change); regions.push(...island.regions);
+    tc += island.tempoConfidence * island.span; dc += result.downbeatConfidence * island.span; w += island.span;
   }
   let bpm = 0, total = 0;
   if (regions.length) {
@@ -425,8 +506,8 @@ export function analyzeRhythm(input: RhythmInput): RhythmResult {
     bar0 = round4(downbeats[best]!);
   }
   return {
-    bpm: Math.round(bpm * 1000) / 1000, beats: beats.map(round4), downbeats: downbeats.map(round4), bar0, regions,
-    confidence: { tempo: w ? Math.round(tc / w * 1000) / 1000 : 0, downbeat: w ? Math.round(dc / w * 1000) / 1000 : 0 },
+    bpm: Math.round(bpm * 1000) / 1000, beats: beats.map(round4), downbeats: downbeats.map(round4), bar0, regions, beatsPerBar: meter.meter,
+    confidence: { tempo: w ? Math.round(tc / w * 1000) / 1000 : 0, downbeat: w ? Math.round(dc / w * 1000) / 1000 : 0, meter: meter.confidence },
     change,
   };
 }

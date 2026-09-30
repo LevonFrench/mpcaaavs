@@ -20,6 +20,8 @@ import { arraySource, SongMapScan, type SongMapUpdate } from '../src/song-map/sc
 import { bridgeLibraryCall, createHostSongMap, httpLibraryCall } from '../src/song-map/host.ts';
 import { SongMapSession, type SongMapState } from '../src/song-map/session.ts';
 import { SONG_MAP_VERSION, type SongMapJSON } from '../src/song-map/types.ts';
+import { backbeats, beatsPerBarOf } from '../src/song-map/meter.ts';
+import { validateSongMap } from '../src/song-map/validate.ts';
 // @ts-expect-error plain JS server module
 import { createLibraryHandler } from './standalone-library.mjs';
 import { FIXTURES, renderBassFixture, renderFixture, type Fixture } from './song-map-fixtures.ts';
@@ -70,6 +72,40 @@ function scanWhole(sampleRate: number, left: Float32Array, right: Float32Array):
   log('clock: sectionAt, nextBoundary, barAt, beatAt, timeOfBeat, revision: PASS');
 }
 
+// ------------------------------------------------------------------------------------------ meter (beats per bar)
+{
+  // helpers: only integers 2..12 are honoured; everything else (absent, fractional, out of range, not a number) reads as 4
+  assert.equal(beatsPerBarOf(undefined), 4); assert.equal(beatsPerBarOf(3), 3); assert.equal(beatsPerBarOf(2), 2); assert.equal(beatsPerBarOf(12), 12);
+  for (const bad of [0, 1, 13, 16, -3, 3.5, NaN, Infinity, '3', null, {}, []]) assert.equal(beatsPerBarOf(bad), 4, `beatsPerBarOf(${String(bad)})`);
+  assert.deepEqual([2, 3, 4, 5, 6, 7, 8, 9, 10, 12].map(n => [...backbeats(n)]), [[1], [1, 2], [1, 3], [1, 3], [3], [2, 4], [2, 6], [3, 6], [3, 8], [3, 9]], 'backbeat table');
+  for (let n = 2; n <= 12; n++) assert.ok(backbeats(n).every((b, i, a) => Number.isInteger(b) && b > 0 && b < n && (i === 0 || b > a[i - 1]!)), `backbeats(${n}) are sorted beats after the downbeat`);
+  assert.deepEqual([...backbeats(99 as number)], [...backbeats(4)], 'an unsupported meter has the 4/4 backbeats');
+  // a waltz clock: bars of three beats, from the downbeat grid and from the beats alone
+  const beats: number[] = [], downbeats: number[] = [];
+  for (let b = 0; b < 60; b++) { beats.push(1 + b * .5); if (b % 3 === 0) downbeats.push(1 + b * .5); }
+  const waltz = { version: SONG_MAP_VERSION, duration: 40, bpm: 120, fps: 100, beats, downbeats, beatsPerBar: 3, sections: [], features: {}, onsets: { kick: [], snare: [], hat: [], vocal: [] },
+    confidence: { tempo: 1, downbeat: 1, sections: 1 }, approximations: [] } as unknown as SongMapJSON;
+  const c3 = new SongMapClock(waltz);
+  assert.equal(c3.beatsPerBar, 3);
+  const at = c3.barPosition(1 + 1.5 + .5);   // second bar, second beat
+  assert.ok(Math.abs(at.bar - 1.333333333) < 1e-6 && Math.abs(at.beatInBar - 1) < 1e-9 && Math.abs(at.phase - 1 / 3) < 1e-9, `3/4 barPosition ${JSON.stringify(at)}`);
+  const last = c3.barPosition(1 + 1.5 - 1e-7);
+  assert.ok(last.beatInBar < 3 && last.beatInBar > 2.99, 'beatInBar stays below the meter');
+  for (const time of [-1, 0, 1, 2.3, 10, 25, 39]) assert.ok(Math.abs(c3.timeOfBar(c3.barAt(time)) - time) < 1e-9, `3/4 bar round trip ${time}`);
+  const noDownbeats = new SongMapClock({ ...waltz, downbeats: [] });
+  assert.ok(Math.abs(noDownbeats.barAt(1 + 6 * .5) - 2) < 1e-9 && Math.abs(noDownbeats.timeOfBar(2) - (1 + 3)) < 1e-9, 'without downbeats a bar is beatsPerBar beats');
+  // absent, or unusable, means 4: the original behaviour, unchanged
+  const plain = new SongMapClock({ ...waltz, beatsPerBar: undefined, downbeats: beats.filter((_, i) => i % 4 === 0) });
+  assert.equal(plain.beatsPerBar, 4); assert.ok(Math.abs(plain.barPosition(1 + .5 * 6).beatInBar - 2) < 1e-9, '4/4 when the map is silent about the meter');
+  for (const bad of [1, 13, 2.5, NaN]) assert.equal(new SongMapClock({ ...waltz, beatsPerBar: bad }).beatsPerBar, 4, `a clock ignores beatsPerBar ${bad}`);
+  // validation: optional; an unusable value is an error rather than a silent 4
+  const fullMap = (extra: object) => ({ ...waltz, features: Object.fromEntries(['rms', 'low', 'mid', 'high', 'vocal', 'drums', 'bass', 'other'].map(k => [k, []])), sections: [{ name: 'x', role: 'groove', start: 0, end: 10, energy: .5 }], ...extra });
+  assert.equal(validateSongMap(fullMap({})).beatsPerBar, 3); assert.equal(validateSongMap(fullMap({ beatsPerBar: undefined })).beatsPerBar, undefined);
+  for (const good of [2, 3, 4, 7, 12]) validateSongMap(fullMap({ beatsPerBar: good }));
+  for (const bad of [0, 1, 13, 3.5, NaN, '3', null, [3]]) assert.throws(() => validateSongMap(fullMap({ beatsPerBar: bad })), /beatsPerBar/, `validate rejects ${String(bad)}`);
+  log('meter: helpers, backbeats, 3/4 clock (bars, beatInBar, no-downbeat fallback), default 4, validation: PASS');
+}
+
 // ------------------------------------------------------------------------------------------ fixtures
 const rendered = new Map<string, Fixture>();
 for (const spec of FIXTURES) rendered.set(spec.name, renderFixture(spec));
@@ -103,6 +139,10 @@ for (const spec of FIXTURES) {
   assert.ok(m.approximations.includes('vocal') && m.approximations.includes('drums'), 'stem-free features are declared approximations');
   assert.equal(m.spectrum!.frames, m.features.rms.length); assert.equal(result.spec.length, m.spectrum!.frames * (m.spectrum!.mel + m.spectrum!.chroma));
   assert.ok(m.wave && result.wave.length === m.wave.frames * 2 && m.wave.rate === 11025, 'waveform ships when the scan is complete');
+  // The meter: a waltz reads as 3 beats per bar with a decisive confidence; every 4/4 fixture stays on the default and omits the field.
+  assert.equal(m.beatsPerBar, fx.truth.beatsPerBar === 4 ? undefined : fx.truth.beatsPerBar, `${spec.name}: beatsPerBar`);
+  assert.ok(m.confidence.meter !== undefined && m.confidence.meter >= .5, `${spec.name}: meter confidence ${m.confidence.meter}`);
+  assert.equal(new SongMapClock(m).beatsPerBar, fx.truth.beatsPerBar, `${spec.name}: the clock uses the map's meter`);
   if (spec.name === 'house-128') assert.deepEqual(scanWhole(spec.sampleRate, fx.left, fx.right).map, result.map, 'the same PCM always gives the same map');
   if (spec.name === 'house-128') assert.ok(m.confidence.tempo > .8 && m.confidence.downbeat > .8);
 }

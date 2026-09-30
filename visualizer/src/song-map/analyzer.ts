@@ -5,7 +5,8 @@ import { analyzeRhythm } from './rhythm.ts';
 import { analyzeSections } from './sections.ts';
 import { SONG_MAP_VERSION, type SongMapBinary, type SongMapFeature, type SongMapJSON } from './types.ts';
 
-export const SONG_MAP_ANALYZER = 'aaavs-song-map-cpu-1';
+/** Bumped with the meter estimate (3 or 4 beats per bar): a cached map of a waltz from the earlier analyzer has 4/4 bars and is scanned again. */
+export const SONG_MAP_ANALYZER = 'aaavs-song-map-cpu-2';
 /** Region core length. A scheduling and memory boundary, never a musical one. */
 export const REGION_CORE_SECONDS = 300;
 export const DEFAULT_MAX_WAVE_SECONDS = 600;
@@ -109,7 +110,7 @@ export class SongMapAnalyzer {
     });
     const sections = analyzeSections({
       fps: FPS, duration, islands: derived.islands, downbeats: rhythm.downbeats, ...(rhythm.bar0 !== undefined ? { bar0: rhythm.bar0 } : {}),
-      features: derived.features, kicks: derived.onsets.kick, snares: derived.onsets.snare, hats: derived.onsets.hat,
+      features: derived.features, kicks: derived.onsets.kick, snares: derived.onsets.snare, hats: derived.onsets.hat, beatsPerBar: rhythm.beatsPerBar,
       spec: derived.spec, specStride: S, chromaOffset: MEL_BANDS, downbeatConfidence: rhythm.confidence.downbeat, bassMidi: derived.bassMidi, trackFrames: store.frameCount,
     });
     const features = {} as Record<SongMapFeature, number[]>;
@@ -137,6 +138,7 @@ export class SongMapAnalyzer {
       fps: FPS,
       beats: rhythm.beats,
       downbeats: rhythm.downbeats,
+      ...(rhythm.beatsPerBar !== 4 ? { beatsPerBar: rhythm.beatsPerBar } : {}),
       ...(rhythm.bar0 !== undefined ? { bar0: rhythm.bar0 } : {}),
       sections: sections.sections,
       features,
@@ -144,7 +146,7 @@ export class SongMapAnalyzer {
       bass_midi: Array.from(derived.bassMidi, x => Math.round(x * 100) / 100),
       spectrum: { frames: derived.n, mel: MEL_BANDS, chroma: CHROMA_BINS, fmin: MEL_FMIN, fmax: MEL_FMAX },
       ...(waveReady ? { wave: { rate: LOW_RATE, channels: 2, frames: waveFrames } } : {}),
-      confidence: { tempo: rhythm.confidence.tempo, downbeat: rhythm.confidence.downbeat, sections: sections.confidence },
+      confidence: { tempo: rhythm.confidence.tempo, downbeat: rhythm.confidence.downbeat, sections: sections.confidence, meter: rhythm.confidence.meter },
       approximations,
     };
     return { map, binary: { spec: derived.spec, wave }, coverage, complete };

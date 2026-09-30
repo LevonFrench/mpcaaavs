@@ -416,7 +416,7 @@ export default class Harmonics extends Scene {
     // ================= footer: bar counter + ticker
     {
       const bar = songBar(au, t);
-      const bi = Math.floor(bar), beat = Math.floor((bar - bi) * 4) + 1;
+      const bi = Math.floor(bar), beat = Math.floor((bar - bi) * au.beatsPerBar) + 1;
       sevenSeg(c, `${String(bi).padStart(2, '0')}.${beat}`, 80, 998, 34, oc(1), oc(0.08));
       c.font = font(F.mono(600), 11); c.fillStyle = oc(0.7); c.fillText('BAR.BEAT', 80, 1052);
       const secs = t;

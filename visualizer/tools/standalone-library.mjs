@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { lstat, mkdir, open, readdir, realpath, rename, unlink, link, utimes } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path';
+import { createShowPackReader } from './show-pack-server.mjs';
 
 const REQUEST_LIMIT = 4 * 1024 * 1024;
 const DATA_LIMIT = 32 * 1024 * 1024;
@@ -274,6 +275,15 @@ async function rate(root, request) {
   return { type:'rating-saved', entry };
 }
 
+const SHOW_PACK_OPS = ['list-show-packs','list-show-pack-files','read-show-pack-file'];
+async function showPackOp(packs, request) {
+  const exact = keys => requireValue(Object.keys(request).every(key => key === 'op' || keys.includes(key)), 'Invalid library request');
+  switch(request.op) {
+    case 'list-show-packs': exact([]); return {type:'show-packs',packs:await packs.list()};
+    case 'list-show-pack-files': exact(['pack']); return {type:'show-pack-files',pack:request.pack,files:await packs.files(request.pack)};
+    default: exact(['pack','path']); return await packs.read(request.pack,request.path);
+  }
+}
 function send(res, status, value) {
   res.writeHead(status, { 'Content-Type':'application/json; charset=utf-8', 'Cache-Control':'no-store', 'X-Content-Type-Options':'nosniff', 'Cross-Origin-Resource-Policy':'same-origin' });
   res.end(JSON.stringify(value));
@@ -302,8 +312,10 @@ async function body(req) {
   return JSON.parse(new TextDecoder('utf-8', {fatal:true}).decode(Buffer.concat(blocks)));
 }
 
-/** root is the AAAVS application directory, not the collection directory. */
-export function createLibraryHandler(root) {
+/** root is the AAAVS application directory, not the collection directory. `options.showPacks` is the directory holding private show asset packs
+ * (`<dir>/<pack-id>/pack.json`, tools/show-pack-server.mjs); without it the read-only show-pack operations are refused. */
+export function createLibraryHandler(root, options = {}) {
+  const showPacks = createShowPackReader(options.showPacks);
   const collection = resolve(root, 'avs presets'), privateRoot = join(collection, '.aaavs-private');
   let queue = Promise.resolve(), pending = 0;
   async function execute(request) {
@@ -398,9 +410,17 @@ export function createLibraryHandler(root) {
       req.setTimeout(0);
       requireValue(request && typeof request === 'object' && !Array.isArray(request) && typeof request.op === 'string' && request.op.length <= 40, 'Invalid library request');
       operation = request.op;
+      // Read-only show-pack operations never touch the collection, its locks or the write queue.
+      if(SHOW_PACK_OPS.includes(request.op)) {
+        const result = await showPackOp(showPacks,request);
+        if(Buffer.isBuffer(result)) { res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Length':result.length,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Cross-Origin-Resource-Policy':'same-origin'}); res.end(result); }
+        else send(res,200,result);
+        return true;
+      }
       const task = queue.then(() => execute(request)); queue = task.catch(() => {});
       send(res,200,await task);
     } catch(error) {
+      if(error.showPack) { req.setTimeout(0); req.resume(); send(res,error.missing?404:400,{type:'library-error',operation,message:error.message,...(error.missing?{missing:true}:{})}); return true; }
       req.setTimeout(0); req.resume();
       // Do not leak local filesystem paths through Node system error messages.
       const message = error.code ? ({EEXIST:'Library transaction or rated filename already exists',ENOENT:'Library file is missing',EACCES:'Library file is not writable',EPERM:'Library operation is not permitted'}[error.code] ?? 'Library filesystem operation failed') : error.message;
