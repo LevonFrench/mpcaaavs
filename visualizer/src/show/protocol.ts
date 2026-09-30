@@ -33,6 +33,9 @@ export interface ShowInitMessage {
   /** Live fallback only: media duration and tempo when there is no song map. */
   readonly duration?: number;
   readonly bpm?: number;
+  /** Live fallback only: time of any beat (grid phase, default 0) and the PCM rate of the AVS frames (default 44100). */
+  readonly firstBeat?: number;
+  readonly sampleRate?: number;
   /** Plan the whole show with planShow() (default true when a song map is given). */
   readonly plan?: boolean;
   /** Restrict the plan to these plate ids (faster stills). */
@@ -53,7 +56,21 @@ export interface ShowRenderMessage {
   readonly sync?: boolean;
 }
 
-export type ShowWorkerRequest = ShowInitMessage | ShowRenderMessage;
+/**
+ * Live fallback only: one AVS audio frame played at media time `time` (the end of its 576-sample window).
+ * `waveform` and `spectrum` hold 1152 bytes each: 576 left then 576 right (src/avs/types.ts AvsAudioFrame).
+ */
+export interface ShowAudioMessage {
+  readonly type: 'show-audio';
+  readonly generation: number;
+  readonly time: number;
+  readonly waveform: ArrayBuffer;
+  readonly spectrum: ArrayBuffer;
+  readonly beat: boolean;
+  readonly beatLevel: number;
+}
+
+export type ShowWorkerRequest = ShowInitMessage | ShowRenderMessage | ShowAudioMessage;
 
 export interface ShowPlanEntry { readonly id: string; readonly role: string; readonly start: number; readonly end: number; readonly startBar: number; readonly endBar: number }
 
@@ -104,7 +121,9 @@ export function validateShowRequest(m: unknown): ShowWorkerRequest {
       if (!x.params || typeof x.params !== 'object') throw new Error('Invalid show params');
       for (const [k, v] of Object.entries(x.params)) if (!PARAM_KEYS.has(k) || (typeof v !== 'string' || v.length > 200)) throw new Error('Invalid show params');
     }
-    if (x.songMap === null && (!finite(x.duration) || (x.duration as number) <= 0 || !finite(x.bpm) || (x.bpm as number) < 20 || (x.bpm as number) > 400)) throw new Error('Invalid live show clock');
+    if (x.songMap === null && (!finite(x.duration) || (x.duration as number) <= 0 || (x.duration as number) > 6 * 3600 || !finite(x.bpm) || (x.bpm as number) < 20 || (x.bpm as number) > 400)) throw new Error('Invalid live show clock');
+    if (x.firstBeat !== undefined && (!finite(x.firstBeat) || Math.abs(x.firstBeat as number) > 6 * 3600)) throw new Error('Invalid live show clock');
+    if (x.sampleRate !== undefined && (!finite(x.sampleRate) || (x.sampleRate as number) < 8000 || (x.sampleRate as number) > 384000)) throw new Error('Invalid live show clock');
     if (x.plan !== undefined && typeof x.plan !== 'boolean') throw new Error('Invalid show plan flag');
     if (x.only !== undefined && (!Array.isArray(x.only) || x.only.some((s) => typeof s !== 'string'))) throw new Error('Invalid show plate filter');
     return m as ShowInitMessage;
@@ -114,6 +133,12 @@ export function validateShowRequest(m: unknown): ShowWorkerRequest {
     if (x.dt !== undefined && (!finite(x.dt) || (x.dt as number) <= 0 || (x.dt as number) > 1)) throw new Error('Invalid show clock');
     if (x.sync !== undefined && typeof x.sync !== 'boolean') throw new Error('Invalid show sync flag');
     return m as ShowRenderMessage;
+  }
+  if (x.type === 'show-audio') {
+    if (!finite(x.time) || (x.time as number) < 0 || (x.time as number) > 6 * 3600) throw new Error('Invalid show audio clock');
+    for (const k of ['waveform', 'spectrum'] as const) if (!(x[k] instanceof ArrayBuffer) || x[k].byteLength !== 1152) throw new Error(`Invalid show audio ${k}`);
+    if (typeof x.beat !== 'boolean' || !finite(x.beatLevel) || (x.beatLevel as number) < 0) throw new Error('Invalid show audio beat');
+    return m as ShowAudioMessage;
   }
   throw new Error('Invalid show message type');
 }

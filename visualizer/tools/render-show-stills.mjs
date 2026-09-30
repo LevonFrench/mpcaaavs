@@ -9,6 +9,8 @@
 //   node tools/render-show-stills.mjs --plates --compare <evangelion checkout>  + upstream + contact sheets
 //   --sheet-dir <dir>  where contact sheets go (default <out>/sheets); --jpg-quality 0.82; --cell 640
 //   --timing           report render cost per plate (GPU-synchronised, software rendering: relative only)
+//   --live             no song map: the live fallback (tempo grid from the fixture's tempo and first beat) fed with AVS
+//                      frames made from the synthesized waveform at 60 fps up to each still time (use with --t)
 import { build } from 'esbuild';
 import { createServer } from 'node:http';
 import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync } from 'node:fs';
@@ -37,10 +39,15 @@ const BROWSER_ARGS = ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', 
 const buildDir = join(VIS, '.tmp', 'show-stills');
 mkdirSync(buildDir, { recursive: true });
 await build({ entryPoints: [join(VIS, 'src/show-render.worker.ts')], bundle: true, format: 'esm', target: 'es2022', outdir: buildDir, entryNames: '[name]', logLevel: 'warning' });
+// --live: the page turns the fixture's synthesized waveform into AVS audio frames (the real AvsAudioAnalyser)
+await build({
+  stdin: { contents: `export { synthesizeWave } from './src/song-map/synth-wave.ts'; export { AvsAudioAnalyser } from './src/avs/audio.ts';`, resolveDir: VIS, loader: 'ts' },
+  bundle: true, format: 'esm', target: 'es2022', outfile: join(buildDir, 'live-feed.js'), logLevel: 'warning',
+});
 writeFileSync(join(buildDir, 'index.html'), `<!doctype html><meta charset="utf-8"><title>show stills</title><body style="margin:0;background:#000">
 <canvas id="c"></canvas>
 <script type="module">
-let worker, gen = 0, seq = 0, pending = new Map(), ready = null;
+let worker, gen = 0, seq = 0, pending = new Map(), ready = null, feed = null;
 const cv = document.getElementById('c');
 window.__show = {
   async init(o) {
@@ -53,8 +60,32 @@ window.__show = {
       else if (data.type === 'show-error') { if (pending.size) { for (const p of pending.values()) p.rej(new Error(data.message)); pending.clear(); } else ready.rej(new Error(data.message)); }
       else if (data.type === 'show-frame') { const p = pending.get(data.sequence); pending.delete(data.sequence); p?.res(data); }
     };
-    worker.postMessage({ type: 'show-init', generation: gen, assetBase: '/show-assets/', songMap, spec, params: o.params, only: o.only ?? undefined, verbose: !!o.verbose }, [spec]);
+    if (o.live) {
+      const { synthesizeWave, AvsAudioAnalyser } = await import('/.tmp/show-stills/live-feed.js');
+      const w = synthesizeWave(songMap, { spec: new Uint8Array(spec) });
+      feed = { wave: w.wave, rate: w.rate, an: new AvsAudioAnalyser(), next: 1 };
+      worker.postMessage({ type: 'show-init', generation: gen, assetBase: '/show-assets/', songMap: null, duration: songMap.duration, bpm: songMap.bpm, firstBeat: songMap.beats[0], params: o.params, verbose: !!o.verbose });
+    } else worker.postMessage({ type: 'show-init', generation: gen, assetBase: '/show-assets/', songMap, spec, params: o.params, only: o.only ?? undefined, verbose: !!o.verbose }, [spec]);
     return r;
+  },
+  // live: AVS frames at 60 fps from the last fed frame up to song time t (44.1 kHz PCM upsampled from the synthesized wave)
+  feedTo(t) {
+    const SR = 44100, L = new Float32Array(576), R = new Float32Array(576);
+    let k = feed.next, n = 0;
+    for (; k / 60 <= t; k++, n++) {
+      const end = k / 60;
+      for (let i = 0; i < 576; i++) {
+        const x = Math.max(0, (end - (576 - i) / SR) * feed.rate), j = Math.floor(x), f = x - j;
+        L[i] = (feed.wave[2 * j] ?? 0) * (1 - f) + (feed.wave[2 * j + 2] ?? 0) * f;
+        R[i] = (feed.wave[2 * j + 1] ?? 0) * (1 - f) + (feed.wave[2 * j + 3] ?? 0) * f;
+      }
+      const a = feed.an.analyse({ left: L, right: R });
+      const wf = new Uint8Array(1152), sp = new Uint8Array(1152);
+      wf.set(a.waveform[0]); wf.set(a.waveform[1], 576); sp.set(a.spectrum[0]); sp.set(a.spectrum[1], 576);
+      worker.postMessage({ type: 'show-audio', generation: gen, time: end, waveform: wf.buffer, spectrum: sp.buffer, beat: a.beat, beatLevel: a.beatLevel }, [wf.buffer, sp.buffer]);
+    }
+    feed.next = k;
+    return n;
   },
   async still(t, sync) {
     const s = ++seq;
@@ -125,13 +156,17 @@ try {
   const page = await newPage(browser, logs);
   await page.goto(srv.url + '/');
   await page.waitForFunction(() => window.__ready);
-  const only = ONLY ?? [...new Set(times.map(plateAt))];
-  const ready = await page.evaluate(([params, only, scale, verbose]) => window.__show.init({ params, only, scale, verbose }), [PARAMS, only, SCALE, flag('verbose')]);
+  const LIVE = flag('live');
+  const only = LIVE ? null : ONLY ?? [...new Set(times.map(plateAt))];
+  const ready = await page.evaluate(([params, only, scale, verbose, live]) => window.__show.init({ params, only, scale, verbose, live }), [PARAMS, only, SCALE, flag('verbose'), LIVE]);
+  if (LIVE) console.log(`live plan: ${ready.plan.map((p) => `${p.id}[${p.start.toFixed(1)}-${p.end.toFixed(1)}]`).join(' ')}`);
+  if (LIVE) times.sort((a, b) => a - b);
   console.log(`ours: ${ready.width}x${ready.height}, init ${ready.initMs.toFixed(0)} ms, synthesized wave ${ready.synthesizedWave}`);
   if (ready.errors.length) console.error('SCENE ERRORS:\n' + ready.errors.join('\n'));
   for (const t of times) {
+    if (LIVE) console.log(`live: fed ${await page.evaluate(([t]) => window.__show.feedTo(t), [t])} AVS frames up to t=${t.toFixed(2)}`);
     const r = await page.evaluate(([t]) => window.__show.still(t, true), [t]);
-    const f = join(OUT, `ours_${r.plate ?? 'none'}_${t.toFixed(2).padStart(7, '0')}.png`);
+    const f = join(OUT, `${LIVE ? 'live' : 'ours'}_${r.plate ?? 'none'}_${t.toFixed(2).padStart(7, '0')}.png`);
     writeFileSync(f, Buffer.from(r.png, 'base64'));
     ours.set(t, f);
     console.log(`ours t=${t.toFixed(2)} ${r.plate} ${r.renderMs.toFixed(1)} ms -> ${f}`);

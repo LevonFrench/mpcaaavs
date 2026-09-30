@@ -11,7 +11,7 @@ import { Hud, type Caption } from './hud.ts';
 import type { Frame, Scene, SceneClass, SceneCtx, PostOverrides } from './scene.ts';
 import { loadFonts } from './type.ts';
 import { loadStrokeFonts } from './stroke.ts';
-import { createSpectrumTextures, disposeSpectrumTextures, type SpectrumTextures } from './spectrum.ts';
+import { createSpectrumTextures, disposeSpectrumTextures, refreshSpectrumTextures, type SpectrumTextures } from './spectrum.ts';
 
 // AAAVS: fonts are global to the worker (FontFaceSet + opentype cache): load them once.
 let fontsLoading: Promise<void> | null = null;
@@ -259,6 +259,9 @@ export class Engine {
    */
   render(t: number, dt = 1 / 60, toScreen = true, samples: number | AdaptiveSampling = 1, shutter = 0.5): number {
     const r = this.renderer;
+    // AAAVS: the live fallback (live.ts) fills its analysis as it plays; upload what changed since the last frame
+    const dirty = (this.audio as { takeDirty?: () => { f0: number; f1: number; w0: number; w1: number } | null }).takeDirty?.();
+    if (dirty) refreshSpectrumTextures(this.spectrum, this.audio, dirty);
     const seeked = this.lastT < 0 || t < this.lastT - 1e-6 || t - this.lastT > Math.max(0.25, dt * 4);
     this.lastT = t;
     let outTex: THREE.Texture;

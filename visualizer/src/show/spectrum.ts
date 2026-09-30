@@ -53,6 +53,24 @@ export function createSpectrumTextures(a: AudioData): SpectrumTextures {
   };
 }
 
+/**
+ * AAAVS: copy changed analysis frames [f0, f1] and waveform samples [w0, w1] into the GPU copies (the live fallback
+ * fills its analysis while it plays, see live.ts). The texture sizes never change, so uniforms stay valid.
+ */
+export function refreshSpectrumTextures(s: SpectrumTextures, a: AudioData, d: { f0: number; f1: number; w0: number; w1: number }) {
+  const M = a.MEL, S = M + 12;
+  const mel = s.mel.image.data as Uint8Array, chroma = s.chroma.image.data as Uint8Array;
+  for (let f = Math.max(0, d.f0); f <= Math.min(d.f1, s.frames - 1); f++) {
+    const x = f % PACK, y = Math.floor(f / PACK);
+    mel.set(a.spec.subarray(f * S, f * S + M), y * PACK * M + x * M);
+    chroma.set(a.spec.subarray(f * S + M, f * S + S), y * PACK * 12 + x * 12);
+  }
+  const w0 = Math.max(0, d.w0), w1 = Math.min(d.w1, s.waveFrames - 1);
+  if (w1 >= w0) (s.wave.image.data as Float32Array).set(a.wave.subarray(2 * w0, 2 * w1 + 2), 2 * w0);
+  s.mel.needsUpdate = s.chroma.needsUpdate = true;
+  if (w1 >= w0) s.wave.needsUpdate = true;
+}
+
 /** Uniforms for SPECTRUM_GLSL; spread into an FSPass / ShaderMaterial's uniforms. */
 export function spectrumUniforms(s: SpectrumTextures) {
   return {
