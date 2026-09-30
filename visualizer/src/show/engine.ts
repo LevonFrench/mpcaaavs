@@ -5,7 +5,8 @@ import * as THREE from 'three';
 import type { AudioData } from './audio.ts';
 import { Lyrics } from './lyrics.ts';
 import type { BarMap } from './bar-map.ts';
-import { Compositor, FSPass, W, H, PW, PH, SCALE, SS_TAP, makeRT, clearRT } from './gl.ts';
+import { Compositor, FSPass, Layer2D, W, H, PW, PH, SCALE, SS_TAP, makeRT, clearRT, setLayerOwner } from './gl.ts';
+import { PERF, perfBegin, perfEnd, perfSetContext } from './perf.ts';
 import { DEFAULT_POST, Post, SHOULDER_GLSL, type PostParams } from './post.ts';
 import { Hud, type Caption } from './hud.ts';
 import type { Frame, Scene, SceneClass, SceneCtx, PostOverrides } from './scene.ts';
@@ -63,6 +64,11 @@ function ternaryOffsets(steps: number) {
   return u;
 }
 
+/** Profiler names of a scene's Canvas2D layers: <plate>.<field> for layers held directly in a field of the scene (others keep <plate>#<n>). */
+function nameLayers(scene: object, plate: string) {
+  for (const [k, v] of Object.entries(scene)) if (v instanceof Layer2D) v.id = `${plate}.${k}`;
+}
+
 export class Engine {
   renderer: THREE.WebGLRenderer;
   ctx!: SceneCtx;
@@ -110,6 +116,7 @@ export class Engine {
     this.renderer.setPixelRatio(1);
     this.renderer.setSize(PW, PH, false);
     this.renderer.autoClear = false;
+    perfSetContext(this.renderer.getContext() as WebGL2RenderingContext);
     this.blit = new FSPass(`uniform sampler2D src; void main(){ fragColor = texture(src, vUv); }`, { src: { value: null } });
     this.xfade = new FSPass(`uniform sampler2D a; uniform sampler2D b; uniform float k;
       void main(){ fragColor = mix(texture(a, vUv), texture(b, vUv), k); }`, { a: { value: null }, b: { value: null }, k: { value: 0 } });
@@ -177,6 +184,7 @@ export class Engine {
       return { start: e.start + d, end: e.start + d + (e.caption!.dur ?? 4.5), fig: e.caption!.fig, text: e.caption!.text };
     });
     this.hud = new Hud(captions);
+    this.hud.layer.id = 'hud';
     const entries = only ? this.timeline.filter(only) : this.timeline;
     await Promise.all(entries.map((e) => this.loadEntry(e)));
   }
@@ -215,8 +223,11 @@ export class Engine {
     this.loaded.set(Engine.keyOf(e), rec);
     try {
       const mod = await e.load();
-      const s = new mod.default({ ...this.ctx, audio: rec.audio!, id: e.id, params: e.params ?? {}, start: e.start, end: e.end });
+      setLayerOwner(e.id); // profiler names only (src/show/perf.ts): the constructor below is synchronous
+      let s: Scene;
+      try { s = new mod.default({ ...this.ctx, audio: rec.audio!, id: e.id, params: e.params ?? {}, start: e.start, end: e.end }); } finally { setLayerOwner(''); }
       await s.init();
+      nameLayers(s, e.id);
       rec.scene = s;
       this.onProgress?.(`scene ${e.id} ready`);
     } catch (err) {
@@ -263,9 +274,11 @@ export class Engine {
    */
   render(t: number, dt = 1 / 60, toScreen = true, samples: number | AdaptiveSampling = 1, shutter = 0.5): number {
     const r = this.renderer;
+    const p0 = PERF.on ? perfBegin() : 0;
     // AAAVS: the live fallback (live.ts) fills its analysis as it plays; upload what changed since the last frame
     const dirty = (this.audio as { takeDirty?: () => { f0: number; f1: number; w0: number; w1: number } | null }).takeDirty?.();
     if (dirty) refreshSpectrumTextures(this.spectrum, this.audio, dirty);
+    if (PERF.on) perfEnd('engine.spectrum', p0);
     const seeked = this.lastT < 0 || t < this.lastT - 1e-6 || t - this.lastT > Math.max(0.25, dt * 4);
     this.lastT = t;
     let outTex: THREE.Texture;
@@ -329,13 +342,20 @@ export class Engine {
       outTex = this.avgRT.texture;
     }
     this.lastSamples = n;
+    const h0 = PERF.on ? perfBegin() : 0;
     const hudTex = this.hud.draw(t, { opacity: this.hudOff ? 0 : post.hud, frame: post.frame, paper: post.paper });
+    if (PERF.on) perfEnd('engine.hud', h0);
+    const q0 = PERF.on ? perfBegin() : 0;
     this.post.render(r, outTex, hudTex, this.finalRT, post, t);
+    if (PERF.on) perfEnd('engine.post', q0);
     this.lastPost = post;
     if (toScreen) {
+      const b0 = PERF.on ? perfBegin() : 0;
       this.blit.u.src!.value = this.finalRT.texture;
       this.blit.render(r, null);
+      if (PERF.on) perfEnd('engine.blit', b0);
     }
+    if (PERF.on) perfEnd('engine.render', p0);
     return n;
   }
 
@@ -365,6 +385,7 @@ export class Engine {
    */
   private composite(t: number, dt: number, seeked: boolean): { outTex: THREE.Texture; post: PostParams } {
     const r = this.renderer;
+    const c0 = PERF.on ? perfBegin() : 0;
 
     const active = this.timeline.filter((e) => t >= e.start && t < e.end && (!this.filter || this.filter(e))).sort((a, b) => a.start - b.start);
     let post: PostParams = { ...DEFAULT_POST };
@@ -390,14 +411,18 @@ export class Engine {
         const from = Math.max(e.start, t - s.prerollMax);
         const step = 1 / 60;
         let first = true;
+        const r0 = PERF.on ? perfBegin() : 0;
         for (let pt = from; pt < t - step * 0.5; pt += step) {
           s.render(this.frameFor(e, pt, first ? 0 : step, first, true, null, 1, 0, rec.audio), rt);
           first = false;
         }
+        if (PERF.on) perfEnd('scene.preroll', r0);
       }
       let ov: PostOverrides | void = undefined;
       try {
+        const s0 = PERF.on ? perfBegin() : 0;
         ov = s.render(this.frameFor(e, t, sceneSeeked ? 0 : dt, sceneSeeked && !s.stateful, false, idx > 0 ? under : null, tin, tout, rec.audio), rt);
+        if (PERF.on) perfEnd('scene.render', s0);
       } catch (err) {
         console.error(`scene ${e.id} render error`, err);
         clearRT(r, rt, [0.25, 0.0, 0.0]);
@@ -409,13 +434,16 @@ export class Engine {
         this.xfade.u.a!.value = under;
         this.xfade.u.b!.value = rt.texture;
         this.xfade.u.k!.value = tin;
+        const x0 = PERF.on ? perfBegin() : 0;
         this.xfade.render(r, this.mixRT);
+        if (PERF.on) perfEnd('engine.xfade', x0);
         outTex = this.mixRT.texture;
       } else outTex = rt.texture;
       under = outTex;
     });
 
     if (!outTex) { clearRT(r, this.rts[0]!, [0, 0, 0]); outTex = this.rts[0]!.texture; }
+    if (PERF.on) perfEnd('engine.composite', c0);
     return { outTex, post };
   }
 
