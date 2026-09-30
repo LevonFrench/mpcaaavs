@@ -2,6 +2,8 @@ import { AUDIO_DURATION_MAX, BEATS_FROM_FADE, FADE_FROM_BEATS } from './mpc-cont
 import { loadPrefs, parseDisplayPrefs, prefsToWire, savePrefs, type DisplayPrefs } from './mpc-display.ts';
 import { defaultSettings, type SetupSettings } from './mpc-setups.ts';
 import { TRANSITIONS } from './mpc-transition.ts';
+import { contentId, decodeToSource, MAX_DECODE_SECONDS } from './song-map/decode.ts';
+import { createHostSongMap, httpLibraryCall } from './song-map/host.ts';
 
 interface PcmPacket { epoch:number; time:number; sampleRate:number; samples:number; pcm:ArrayBuffer; discontinuity?:boolean }
 interface AudioFrame { time:number; sampleRate:number; samples:number; pcm:number[] }
@@ -176,6 +178,28 @@ export async function startStandalonePlayer():Promise<void> {
     },
   });
   (window as unknown as {aaavsBridge:StandaloneBridge}).aaavsBridge=bridge;
+  // The song map: a background scan of each opened file, shared with the host and shows through window.aaavsSongMap.
+  const songMap=createHostSongMap({call:httpLibraryCall(),now:()=>performance.now()});
+  (window as unknown as {aaavsSongMap:unknown}).aaavsSongMap=songMap;
+  let fileToken=0;
+  /** Cache lookup by content hash, then decode and scan on a miss. Never blocks playback; a superseded file is abandoned. */
+  async function startSongMap(selected:File,token:number):Promise<void> {
+    if(!songMap)return;
+    const generation=songMap.hold();
+    try{
+      const duration=await new Promise<number>(resolve=>{
+        if(audio.readyState>=1)resolve(audio.duration);
+        else{const done=()=>resolve(audio.duration);audio.addEventListener('loadedmetadata',done,{once:true});audio.addEventListener('error',done,{once:true});}
+      });
+      if(token!==fileToken)return;
+      if(!Number.isFinite(duration)||duration>MAX_DECODE_SECONDS){songMap.release(generation,'File too long or unreadable for the browser decoder; live map only');return;}
+      const bytes=await selected.arrayBuffer();
+      if(token!==fileToken)return;
+      const id=await contentId(bytes);
+      if(token!==fileToken)return;
+      await songMap.openTrack({id,source:()=>decodeToSource(bytes),playhead:()=>audio.currentTime});
+    }catch(error){if(token===fileToken)songMap.release(generation,String(error));}
+  }
   function reset(running:boolean):void {
     active=running;epoch++;
     queue.reset(epoch,context?.currentTime??0,Number.isFinite(audio.currentTime)?audio.currentTime:0);
@@ -213,10 +237,11 @@ export async function startStandalonePlayer():Promise<void> {
     if(objectUrl)URL.revokeObjectURL(objectUrl);
     objectUrl=URL.createObjectURL(selected);audio.src=objectUrl;audio.playbackRate=1;audio.load();
     name.textContent=selected.name;notice('Ready. Press Play.');file.value='';
+    void startSongMap(selected,++fileToken);
   });
   audio.addEventListener('playing',()=>{reset(true);notice('');play.textContent='Pause';});
   for(const event of ['pause','waiting','ended','seeking','emptied'])audio.addEventListener(event,()=>{reset(false);play.textContent=audio.paused?'Play':'Pause';});
-  audio.addEventListener('seeked',()=>reset(!audio.paused&&!audio.ended&&audio.readyState>=3));
+  audio.addEventListener('seeked',()=>{songMap?.seek(audio.currentTime);reset(!audio.paused&&!audio.ended&&audio.readyState>=3);});
   audio.addEventListener('ratechange',()=>{if(audio.playbackRate!==1){audio.playbackRate=1;notice('The shared visualizer currently uses normal playback speed.');}reset(!audio.paused&&!audio.seeking);});
   audio.addEventListener('error',()=>{reset(false);notice('This audio file could not be decoded by the browser. Try a supported audio format.');});
   audio.addEventListener('loadedmetadata',()=>{seek.disabled=!Number.isFinite(audio.duration);seek.max=Number.isFinite(audio.duration)?String(audio.duration):'0';});
@@ -271,7 +296,7 @@ export async function startStandalonePlayer():Promise<void> {
   ticker=window.setInterval(tick,33);
   document.addEventListener('visibilitychange',()=>{reset(!document.hidden&&!audio.paused&&!audio.seeking);tick();});
   window.addEventListener('pagehide',()=>{
-    disposed=true;playIntent++;window.clearInterval(ticker);audio.pause();reset(false);node?.disconnect();gain?.disconnect();
+    disposed=true;playIntent++;fileToken++;songMap?.close();window.clearInterval(ticker);audio.pause();reset(false);node?.disconnect();gain?.disconnect();
     if(context)void context.close();if(objectUrl)URL.revokeObjectURL(objectUrl);audio.removeAttribute('src');audio.load();
   },{once:true});
   bridge.emit({type:'settings',...defaultSettings,...prefsToWire(bridge.prefs)});

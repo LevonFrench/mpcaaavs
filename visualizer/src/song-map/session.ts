@@ -46,11 +46,13 @@ export interface SongMapSessionOptions {
 export interface OpenTrack {
   /** 64-hex content identity, or null when the host cannot name the track (no caching then). */
   readonly id: string | null;
-  /** Readable PCM, or null when only live PCM will be available. */
-  readonly source: PcmSource | null;
+  /** Readable PCM, a loader that decodes it (called only on a cache miss), or null when only live PCM will be available. */
+  readonly source: PcmSource | (() => Promise<PcmSource>) | null;
   readonly playhead?: () => number;
 }
 
+/** Contiguous played audio required before a live map starts. */
+export const LIVE_WARMUP_SECONDS = 1;
 const IDLE: SongMapState = { generation: 0, trackId: null, status: 'idle', origin: null, revision: 0, update: null, clock: null, cache: 'none', message: '' };
 
 export class SongMapSession {
@@ -61,13 +63,16 @@ export class SongMapSession {
   private current: SongMapState = IDLE;
   private closed = false;
   private scanning = false;
+  private holding = false;
+  private warmup: { time: number; left: Float32Array; right: Float32Array; rate: number; discontinuity: boolean }[] = [];
+  private warmSamples = 0;
 
   constructor(private readonly o: SongMapSessionOptions) {}
 
   get state(): SongMapState { return this.current; }
   get clock(): SongMapClock | null { return this.current.clock; }
   /** True while a full-file scan is running or a complete map (cache or scan) is held: live PCM is then ignored. */
-  get authoritative(): boolean { return this.scanning || this.current.status === 'complete'; }
+  get authoritative(): boolean { return this.holding || this.scanning || this.current.status === 'complete'; }
 
   private set(patch: Partial<SongMapState>): void {
     this.current = { ...this.current, ...patch };
@@ -77,14 +82,28 @@ export class SongMapSession {
   private ensureWorker(): WorkerLike { return this.worker ??= this.o.createWorker(); }
 
   private stop(): void {
+    this.warmup.length = 0; this.warmSamples = 0;
     this.scan?.cancel(); this.scan = null;
     this.live?.close(); this.live = null;
     this.scanning = false;
   }
 
+  /**
+   * A host that is about to decode a file calls this first: live PCM is ignored until `openTrack` or `release`,
+   * so a slow decode cannot start a competing live map for the same track.
+   */
+  hold(): number { const generation = this.reset(null); this.holding = true; return generation; }
+
+  /** The awaited full scan cannot happen (decode failed, file too long): fall back to live PCM. */
+  release(generation: number, message: string): void {
+    if (generation !== this.current.generation) return;
+    this.holding = false;
+    this.set({ status: 'live', message });
+  }
+
   /** Track change or unload. Cancels running work; late messages of the old track are rejected by job id. */
   reset(trackId: string | null = null): number {
-    this.stop();
+    this.stop(); this.holding = false;
     this.current = { ...IDLE, generation: this.current.generation + 1, trackId };
     this.o.onChange?.(this.current);
     return this.current.generation;
@@ -95,6 +114,7 @@ export class SongMapSession {
     if (this.closed) return;
     const id = track.id !== null && isTrackId(track.id) ? track.id : null;
     const generation = this.reset(id);
+    this.holding = false;
     if (id && this.o.store) {
       this.set({ status: 'cache-lookup', message: 'Looking for a saved song map' });
       try {
@@ -115,7 +135,16 @@ export class SongMapSession {
       }
     }
     if (!track.source) { this.set({ status: 'live', message: 'Waiting for live audio' }); return; }
-    await this.runScan(generation, id, track.source, track.playhead);
+    let source: PcmSource;
+    if (typeof track.source === 'function') {
+      this.holding = true; // decoding: live PCM must not start a competing map
+      this.set({ status: 'scanning', origin: 'scan', message: 'Decoding audio' });
+      try { source = await track.source(); }
+      catch (error) { this.release(generation, `Song map needs decoded audio: ${describe(error)}`); return; }
+      if (generation !== this.current.generation) return;
+      this.holding = false;
+    } else source = track.source;
+    await this.runScan(generation, id, source, track.playhead);
   }
 
   private async runScan(generation: number, id: string | null, source: PcmSource, playhead?: () => number): Promise<void> {
@@ -170,7 +199,9 @@ export class SongMapSession {
    */
   feedLive(time: number, left: Float32Array, right: Float32Array, sampleRate: number, discontinuity = false): void {
     if (this.closed || this.authoritative || this.current.status === 'error') return;
-    if (!this.live) {
+    if (this.live) { this.live.push(time, left, right, sampleRate, discontinuity); return; }
+    if (!this.warm(time, left, right, sampleRate, discontinuity)) return;
+    {
       const job = ++this.job;
       this.live = new SongMapLive({
         worker: this.ensureWorker(), job, startRevision: this.current.revision + 1,
@@ -182,7 +213,21 @@ export class SongMapSession {
       });
       this.set({ status: 'live', origin: 'live', message: 'Live map from played audio' });
     }
-    this.live.push(time, left, right, sampleRate, discontinuity);
+    // The warm-up buffer already holds this hop, in order.
+    for (const hop of this.warmup.splice(0)) this.live!.push(hop.time, hop.left, hop.right, hop.rate, hop.discontinuity);
+    this.warmSamples = 0;
+  }
+
+  /**
+   * A live map (and its worker) starts only after one second of contiguous playback: skimming and seeking
+   * never cost a worker. The buffered second is analysed once the map starts, so nothing is lost.
+   */
+  private warm(time: number, left: Float32Array, right: Float32Array, rate: number, discontinuity: boolean): boolean {
+    const last = this.warmup[this.warmup.length - 1];
+    if (discontinuity || (last && Math.abs(time - (last.time + last.left.length / last.rate)) > .002)) { this.warmup.length = 0; this.warmSamples = 0; }
+    this.warmup.push({ time, left: left.slice(), right: right.slice(), rate, discontinuity: this.warmup.length === 0 && discontinuity });
+    this.warmSamples += left.length;
+    return this.warmSamples >= rate * LIVE_WARMUP_SECONDS;
   }
 
   /** Playback paused or stopped: publish what the live feed has so far. */

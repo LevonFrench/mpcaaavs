@@ -22,7 +22,7 @@ DOCUMENTS = (
 RUNTIME_FILES = (
     f'{PRODUCT}.exe', 'visualizer/mpc.html', 'visualizer/dist/mpc-host.js',
     'visualizer/dist/avs-render.worker.js', 'visualizer/dist/nerv-render.worker.js',
-    'visualizer/dist/hud-render.worker.js',
+    'visualizer/dist/hud-render.worker.js', 'visualizer/dist/song-map.worker.js',
 )
 
 

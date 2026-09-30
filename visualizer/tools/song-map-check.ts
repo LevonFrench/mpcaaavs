@@ -3,6 +3,10 @@
 // Run through tools/check-song-map.mjs (esbuild bundle). Accuracy numbers are for synthetic music only.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { createServer } from 'node:http';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { SongMapAnalyzer, planRegions } from '../src/song-map/analyzer.ts';
 import { cacheKey, decodeRecord, encodeRecord, isTrackId, LibrarySongMapStore, MemorySongMapStore, type SongMapRecord } from '../src/song-map/cache.ts';
 import { SongMapClock } from '../src/song-map/clock.ts';
@@ -10,8 +14,11 @@ import { InlineSongMapWorker } from '../src/song-map/inline-worker.ts';
 import { SongMapLive } from '../src/song-map/live.ts';
 import type { SongMapResponse, WorkerLike } from '../src/song-map/protocol.ts';
 import { arraySource, SongMapScan, type SongMapUpdate } from '../src/song-map/scan.ts';
+import { bridgeLibraryCall, createHostSongMap, httpLibraryCall } from '../src/song-map/host.ts';
 import { SongMapSession, type SongMapState } from '../src/song-map/session.ts';
 import { SONG_MAP_VERSION, type SongMapJSON } from '../src/song-map/types.ts';
+// @ts-expect-error plain JS server module
+import { createLibraryHandler } from './standalone-library.mjs';
 import { FIXTURES, renderBassFixture, renderFixture, type Fixture } from './song-map-fixtures.ts';
 // @ts-expect-error plain JS metrics module
 import { evaluate, fMeasure, pitchAccuracy } from './song-map-metrics.mjs';
@@ -282,6 +289,85 @@ const idOf = (fx: { left: Float32Array }) => createHash('sha256').update(Buffer.
   assert.ok(generations.at(-1) === g);
   for (const s of [first, second, third, anon, fourth, seen]) s.close();
   log('session: cache miss -> scan -> save, warm cache hit, no identity, corrupt record, track change mid-scan: PASS');
+}
+
+// ------------------------------------------------------------------------------------------ host adapters
+{
+  // Library transport over the native bridge: replies route by op and key; an unknown op, an error reply and a silent bridge all reject.
+  const posted: string[] = []; let deliver: (data: unknown) => void = () => undefined;
+  const bridge = { postMessage: (m: string) => { posted.push(m); }, addEventListener: (_: 'message', l: (e: MessageEvent) => void) => { deliver = data => l({ data } as MessageEvent); } };
+  const call = bridgeLibraryCall(bridge, 30);
+  const key = cacheKey('c'.repeat(64));
+  const loading = call({ op: 'load-song-map', key });
+  assert.equal(posted[0], `library:${JSON.stringify({ op: 'load-song-map', key })}`);
+  deliver({ type: 'song-map-loaded', key: 'other', data: null }); deliver({ type: 'song-map-loaded', key, data: null });
+  assert.deepEqual(await loading, { type: 'song-map-loaded', key, data: null });
+  const failing = call({ op: 'save-song-map', key, data: {} });
+  deliver({ type: 'library-error', operation: 'save-song-map', message: 'Unknown library request' });
+  await assert.rejects(failing, /Unknown library request/);
+  await assert.rejects(call({ op: 'load-song-map', key }), /did not answer/);
+  // Session with a bridge that never answers still scans and delivers a map.
+  const mute = { postMessage: () => undefined, addEventListener: () => undefined };
+  const degraded = new SongMapSession({ createWorker: () => new InlineSongMapWorker(), store: new LibrarySongMapStore(bridgeLibraryCall(mute, 20)) });
+  await degraded.openTrack({ id: 'd'.repeat(64), source: arraySource(shortSpec.sampleRate, short.left, short.right) });
+  assert.equal(degraded.state.status, 'complete'); assert.ok(['error', 'miss'].includes(degraded.state.cache));
+  degraded.close();
+  assert.equal(createHostSongMap({ call: null }), null, 'no Worker, no song map (the host keeps running)');
+  assert.ok(createHostSongMap({ call: null, createWorker: () => new InlineSongMapWorker() }));
+
+  // Real library server over HTTP: miss, scan, save, then a warm session reads the record back.
+  const root = await mkdtemp(join(tmpdir(), 'aaavs-song-map-lib-'));
+  await mkdir(join(root, 'avs presets', 'catalog'), { recursive: true });
+  const server = createServer(async (req, res) => { if (!(await createLibraryHandler(root)(req, res))) { res.writeHead(404); res.end(); } });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const port = (server.address() as { port: number }).port, origin = `http://127.0.0.1:${port}`;
+    const fetchWithOrigin = ((url: string, init: RequestInit) => fetch(origin + url, { ...init, headers: { ...(init.headers as Record<string, string>), Origin: origin } })) as unknown as typeof fetch;
+    const id = createHash('sha256').update('http fixture').digest('hex');
+    const make = () => createHostSongMap({ call: httpLibraryCall('/api/aaavs/library', fetchWithOrigin), createWorker: () => new InlineSongMapWorker() })!;
+    const cold = make();
+    await cold.openTrack({ id, source: arraySource(shortSpec.sampleRate, short.left, short.right) });
+    for (let i = 0; i < 400 && cold.state.cache !== 'saved'; i++) await new Promise(resolve => setTimeout(resolve, 5));
+    assert.equal(cold.state.cache, 'saved', cold.state.message); assert.equal(cold.state.cache === 'saved' && cold.state.origin, 'scan');
+    const warm = make();
+    await warm.openTrack({ id, source: null });
+    assert.equal(warm.state.origin, 'cache'); assert.equal(warm.state.status, 'complete');
+    assert.deepEqual(warm.state.update!.map.beats, cold.state.update!.map.beats);
+    cold.close(); warm.close();
+  } finally { await new Promise(resolve => server.close(resolve)); await rm(root, { recursive: true, force: true }); }
+
+  // Lazy decode: the source loader runs only on a cache miss; a failing decode falls back to the live map.
+  const store = new MemorySongMapStore();
+  let decodes = 0;
+  const lazy = () => async () => { decodes++; return arraySource(shortSpec.sampleRate, short.left, short.right); };
+  const id = idOf(short);
+  const a = new SongMapSession({ createWorker: () => new InlineSongMapWorker(), store });
+  await a.openTrack({ id, source: lazy() }); assert.equal(decodes, 1);
+  const b = new SongMapSession({ createWorker: () => new InlineSongMapWorker(), store });
+  await b.openTrack({ id, source: lazy() }); assert.equal(decodes, 1, 'a cache hit never decodes'); assert.equal(b.state.origin, 'cache');
+  const c = new SongMapSession({ createWorker: () => new InlineSongMapWorker(), store: null });
+  await c.openTrack({ id: null, source: async () => { throw new Error('unsupported codec'); } });
+  assert.equal(c.state.status, 'live'); assert.match(c.state.message, /unsupported codec/);
+  assert.equal(c.authoritative, false, 'after a failed decode live PCM is accepted again');
+  // hold(): live PCM is ignored while the host decodes; a full scan or cache hit later wins over a live map.
+  const d = new SongMapSession({ createWorker: () => { workersMade++; return new InlineSongMapWorker(); }, store: null });
+  let workersMade = 0;
+  const hop = (t: number) => { const s = Math.round(t * 44100); return [t, house.left.subarray(s, s + 576), house.right.subarray(s, s + 576)] as const; };
+  const generation = d.hold();
+  for (let t = 0; t < 3; t += 576 / 44100) d.feedLive(...hop(t), 44100);
+  assert.equal(workersMade, 0, 'no live map while a decode is pending');
+  d.release(generation, 'decode failed');
+  for (let t = 0; t < .9; t += 576 / 44100) d.feedLive(...hop(t), 44100);
+  assert.equal(workersMade, 0, 'less than one second of playback never costs a worker');
+  for (let t = .9; t < 1.2; t += 576 / 44100) d.feedLive(...hop(t), 44100);
+  assert.equal(workersMade, 1, 'a live map starts after one second of contiguous audio');
+  for (let t = 1.2; t < 12; t += 576 / 44100) d.feedLive(...hop(t), 44100);
+  d.pauseLive();
+  await new Promise(resolve => setTimeout(resolve, 5)); await new Promise(resolve => setTimeout(resolve, 5));
+  assert.equal(d.state.status, 'live'); assert.ok(d.state.update && d.state.update.coverage[0]![0] === 0, 'the buffered first second is analysed too');
+  assert.equal(d.state.revision, d.state.update!.revision);
+  for (const session of [a, b, c, d]) session.close();
+  log('host adapters: bridge and HTTP library transports, real library server round trip, lazy decode, hold/release, live warm-up: PASS');
 }
 
 // ------------------------------------------------------------------------------------------ helpers

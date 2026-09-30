@@ -27,10 +27,14 @@ import { fetchLocalCategories, type TaxonMap } from './avs/preset-categories.ts'
 import * as collectionApi from './avs/local-collection.ts';
 import type { AvsAudioFrame } from './avs/types.ts';
 import { MultiViewSession } from './multi-view-session.ts';
+import { bridgeLibraryCall, createHostSongMap } from './song-map/host.ts';
+import type { SongMapSession } from './song-map/session.ts';
 interface Bridge { postMessage(message: string): void; addEventListener(type: 'message', listener: (event: MessageEvent) => void): void }
 // Both players run this host. Only media transport and library persistence vary.
-const platform = window as unknown as { chrome?: { webview?: Bridge }; aaavsBridge?: Bridge };
+const platform = window as unknown as { chrome?: { webview?: Bridge }; aaavsBridge?: Bridge; aaavsSongMap?: SongMapSession | null };
 const bridge = platform.chrome?.webview ?? platform.aaavsBridge;
+// One song map per page: the standalone Player publishes its own (full-file scan); the MPC host builds one from the PCM it receives.
+const songMap = platform.aaavsSongMap !== undefined ? platform.aaavsSongMap : (platform.aaavsSongMap = createHostSongMap({ call: bridge ? bridgeLibraryCall(bridge) : null, now: () => performance.now() }));
 const canvas = document.querySelector<HTMLCanvasElement>('#visualizer')!;
 const context = canvas.getContext('2d', { alpha: false })!;
 const timing = document.querySelector<HTMLElement>('#timing')!;
@@ -434,6 +438,7 @@ bridge?.addEventListener('message', event => {
     if(message.epoch!==epoch)trackDuration=null;
     if(message.duration!==undefined)trackDuration=typeof message.duration==='number'&&Number.isFinite(message.duration)&&message.duration>0&&message.duration<=AUDIO_DURATION_MAX?message.duration:null;
     playing = message.playing === true;management.notePlaying?.(playing);
+    if (!playing) songMap?.pauseLive();
     hostVisible = message.visible !== false;
     if (Array.isArray(message.pcm) && message.pcm.length === 1152) {
       pcm = Float32Array.from(message.pcm, x => typeof x === 'number' && Number.isFinite(x) ? Math.max(-1, Math.min(1, x)) : 0);
@@ -444,10 +449,11 @@ bridge?.addEventListener('message', event => {
       epoch = message.epoch;
       if (message.position !== position) fps.clock.mark(performance.now());
       position = message.position;
-      if (seek) { epoch = message.epoch; clockRevision++;latestAudio=silence();if(active)active.lastAudio=silence();director.reset(); normalizer.reset(); analyser.reset();hudFeed.reset(); active?.audio.reset(); outgoing?.audio.reset();multiView.seek(); cancelPrepared(); presets.cancel(); dirty = true; dispose(outgoing); outgoing = null; transition = null; if (!active&&!clockPhase()&&!multiView.enabled) void prepare(presets.index, false); }
+      if (seek) { songMap?.pauseLive(); epoch = message.epoch; clockRevision++;latestAudio=silence();if(active)active.lastAudio=silence();director.reset(); normalizer.reset(); analyser.reset();hudFeed.reset(); active?.audio.reset(); outgoing?.audio.reset();multiView.seek(); cancelPrepared(); presets.cancel(); dirty = true; dispose(outgoing); outgoing = null; transition = null; if (!active&&!clockPhase()&&!multiView.enabled) void prepare(presets.index, false); }
       const frames = Array.isArray(message.frames) ? message.frames.slice(0, 64).filter((frame: {time?: number; pcm?: unknown[]}) => Number.isFinite(frame?.time) && frame.time! <= position && Array.isArray(frame.pcm) && frame.pcm.length === 1152).map((frame: {time: number; pcm: unknown[]; sampleRate?: number; samples?: number}) => ({ time: frame.time, sampleRate: frame.sampleRate, samples: frame.samples, pcm: Float32Array.from(frame.pcm, x => typeof x === 'number' && Number.isFinite(x) ? Math.max(-1, Math.min(1, x)) : 0) })) : undefined;
       if (message.discontinuity === true) { latestAudio=silence();normalizer.reset(); analyser.reset();hudFeed.reset(); active?.audio.reset(); outgoing?.audio.reset(); prepared?.audio.reset();multiView.seek(); }
       const normalized = playing ? frames?.flatMap((frame: SourcePcm) => normalizer.push(frame)) : [];
+      normalized?.forEach((frame: SourcePcm, i: number) => songMap?.feedLive(frame.time, frame.pcm.subarray(0, 576), frame.pcm.subarray(576), 44100, i === 0 && message.discontinuity === true));
       for (const frame of normalized ?? (playing ? [{ time:position, pcm }] : [])) {
         const audio = analyser.analyse({left:frame.pcm.subarray(0,576),right:frame.pcm.subarray(576)});
         hudFeed.pushHop(frame);latestAudio=audio;
@@ -459,6 +465,9 @@ bridge?.addEventListener('message', event => {
       syncSceneClock();
     }
     bridge.postMessage('ack');
+  } else if(message.type==='track') {
+    // Native track identity (docs/SONG-MAP.md): a 64-hex content id names the cache entry; without it the live map is not persisted.
+    if (typeof message.id === 'string') void songMap?.openTrack({ id: message.id, source: null });
   } else if(message.type==='panel') {management.show(message.panel===1||message.panel===2?message.panel:0);
   } else if(message.type==='rate') {rateCurrent(message.delta===1?1:-1);
   } else if(message.type==='not-working') {markCurrent();
@@ -569,7 +578,7 @@ document.addEventListener('keydown', event => {
   if(management.open){if(event.code==='Escape'){event.preventDefault();management.show(0);bridge?.postMessage('panel-close');}return;}
   if (event.code === 'F10' && event.shiftKey || event.code === 'ContextMenu') { event.preventDefault(); bridge?.postMessage('options'); return; } if (event.code === 'Space' && !event.repeat) { event.preventDefault(); bridge?.postMessage('play-pause'); }
 });
-window.addEventListener('pagehide', () => { closed = true;stopDeviceWatch?.();management.dispose?.();multiView.close(); clearTimeout(announceTimer); cancelPrepared(); dispose(active); dispose(outgoing); });
+window.addEventListener('pagehide', () => { closed = true;songMap?.close();stopDeviceWatch?.();management.dispose?.();multiView.close(); clearTimeout(announceTimer); cancelPrepared(); dispose(active); dispose(outgoing); });
 bridge?.postMessage('host-ready');
 const initial=eligiblePresets(catalog,wholeOrder,false,0)[0];
 if(initial!==undefined)void prepare(initial,false);
