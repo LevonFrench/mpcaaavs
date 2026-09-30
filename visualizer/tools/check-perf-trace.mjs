@@ -152,8 +152,12 @@ for (const c of PERF_COUNTERS) ok(emitted.counter.has(c.name), `counter ${c.name
   globalThis.OffscreenCanvas = FakeCanvas;
   const calls = [];
   class FakeGL {
-    constructor() { this.finished = 0; }
-    finish() { this.finished++; }
+    constructor() { this.reads = 0; this.finishes = 0; this.readBinding = 'original'; this.log = []; }
+    finish() { this.finishes++; }
+    isContextLost() { return false; } createTexture() { return {}; } createFramebuffer() { return { private: true }; }
+    getParameter() { return this.readBinding; } bindTexture() {} framebufferTexture2D() {}
+    bindFramebuffer(target, fb) { this.readBinding = fb; this.log.push(fb); }
+    readPixels() { this.reads++; }
     texImage2D(...a) { calls.push(['texImage2D', a.length]); }
     texSubImage2D(...a) { calls.push(['texSubImage2D', a.length]); }
     bufferData() { calls.push(['bufferData']); }
@@ -176,18 +180,31 @@ for (const c of PERF_COUNTERS) ok(emitted.counter.has(c.name), `counter ${c.name
   gl.texImage2D(1, 2, 3, 4, 5, cv); gl.texSubImage2D(1, 0, 0, 0, 4, 4, 6, 7, cv); gl.texImage2D(1, 2, 3, 4, 5, new Uint8Array(4)); gl.bufferSubData(); gl.bufferData();
   ok(calls.filter((c) => c[0] === 'texImage2D').length >= 2 && calls.some((c) => c[0] === 'texSubImage2D') && calls.some((c) => c[0] === 'bufferData'), 'the originals are still called with the same arguments');
   const t0 = perfBegin(); perfEnd('scene.render', t0); perfAdd('comp.draw', 1.5);
-  ok(gl.finished === 0, 'mode 1 never calls gl.finish');
+  ok(gl.reads === 0 && gl.finishes === 0, 'mode 1 never waits for the GPU');
   const rep = perfTake();
   validateWorkerPerf(rep);
   ok(rep.mode === 1 && rep.stages['gl.upload.canvas'] >= 0 && 'layer.magi.L.upload' in rep.stages && 'gl.upload.data' in rep.stages && 'gl.upload.buffer' in rep.stages && rep.stages['comp.draw'] >= 1.5 && rep.counts['gl.upload.canvas'] === 2 && typeof rep.epoch === 'number' || rep.epoch === undefined, 'uploads are attributed to their layer, to typed data and to buffers');
   ok(Object.keys(perfTake().stages).length === 0, 'a report resets the accumulators');
   perfConfigure(2);
   ok(PERF.sync, 'mode 2 is synchronised');
-  const b = perfBegin(); ok(gl.finished === 1, 'sync mode finishes before a stage'); perfEnd('post.final', b); ok(gl.finished === 2, 'and after it');
+  const b = perfBegin(); ok(gl.reads === 1, 'sync mode waits for the GPU (a 1x1 readPixels, since Chromium\'s finish() only flushes) before a stage'); perfEnd('post.final', b); ok(gl.reads === 2, 'and after it');
+  ok(gl.readBinding === 'original' && gl.log.some((x) => x && x.private), 'the read framebuffer binding is restored after the wait, so three.js\' state cache stays valid');
   ok(perfTake().mode === 2, 'the report names its mode');
   perfConfigure(0);
   ok(!PERF.on && !PERF.sync && !Object.hasOwn(gl, 'texImage2D') && !Object.hasOwn(gl, 'bufferData') && perfTake() === undefined, 'turning it off removes the patches and the report');
   const before = calls.length; gl.texImage2D(1, 2, 3, 4, 5, cv); ok(calls.length === before + 1 && perfTake() === undefined, 'after off, uploads call straight through unmeasured');
+}
+
+// ------------------------------------------------------------------ 5. the documentation stays in step
+{
+  const { execFileSync } = await import('node:child_process');
+  execFileSync(process.execPath, [join(VIS, 'tools/perf-docs.mjs'), '--check'], { stdio: 'pipe' }); n++;
+  const doc = readFileSync(join(VIS, '..', 'docs/PERFORMANCE.md'), 'utf8');
+  for (const s of PERF_STAGES) ok(doc.includes(`\`${s.name}\``), `docs/PERFORMANCE.md names ${s.name}`);
+  for (const c of PERF_COUNTERS) ok(doc.includes(c.name), `docs/PERFORMANCE.md names ${c.name}`);
+  ok(doc.includes('node tools/bench-shows.mjs --gpu --chromium "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --sizes 1920x1080,3840x2160 --seconds 20 --out bench.json'), 'the Windows command for the owner is documented');
+  const benchSrc = readFileSync(join(VIS, 'tools/bench-shows.mjs'), 'utf8');
+  for (const o of ['--seconds', '--sizes', '--plates', '--chromium', '--gpu', '--browser-arg', '--headed', '--sync', '--compare', '--out', '--avs-dir', '--multiview']) { ok(benchSrc.includes(o) && doc.includes(o), `bench option ${o} exists and is documented`); }
 }
 
 console.log(`Performance instrumentation contract PASS (${n} assertions): stage catalog and trace format, source/catalog agreement, off by default and reversible, guarded call sites.`);

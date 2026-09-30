@@ -2,10 +2,10 @@
 //   const p = PERF.on ? perfBegin() : 0;  ...work...  if (PERF.on) perfEnd('stage.name', p);
 // so the disabled cost is one property read and a branch, and nothing is allocated or patched.
 //
-// Modes (src/perf-trace.ts PerfMode): 1 = CPU timestamps around each stage; 2 = the same with gl.finish() before and after each GL-facing
-// stage, so a stage includes the GPU work it queued. Mode 2 serialises the CPU and the GPU: it attributes cost to stages correctly but
-// removes the pipelining a real frame enjoys, so its total is larger than a real frame. Canvas2D layer rasterisation is not covered by
-// gl.finish (Chromium flushes it when the canvas is uploaded as a texture: see gl.upload.canvas).
+// Modes (src/perf-trace.ts PerfMode): 1 = CPU timestamps around each stage; 2 = the same with a GPU wait (a 1x1 readPixels; Chromium's gl.finish() only
+// flushes) before and after each GL-facing stage, so a stage includes the GPU work it queued. Mode 2 serialises the CPU and the GPU: it attributes
+// cost to stages correctly but removes the pipelining a real frame enjoys, so its total is larger than a real frame. Canvas2D layer rasterisation
+// is not covered by the wait (Chromium flushes it when the canvas is uploaded as a texture: see gl.upload.canvas).
 //
 // Stage times of one frame are summed into an accumulator and handed out by perfTake() for the frame reply (`perf` field).
 import { epochNow, type PerfMode, type WorkerPerfFrame } from './perf-trace.ts';
@@ -19,12 +19,35 @@ let cnt: Record<string, number> = {};
 /** The clock of the profiler: the only place the show engine's instrumentation reads time (tools/check-show-determinism.mjs keeps src/show free of performance.now). */
 export const perfNow = (): number => performance.now();
 
+/**
+ * Wait until the GPU has finished everything queued so far. Chromium implements WebGL `finish()` as a flush, which does not wait, so the wait is a
+ * 1x1 readPixels from a private RGBA8 target: the read is ordered after all earlier commands of the context. The read framebuffer binding is saved
+ * and restored, so three.js' state cache stays valid; no draw state is touched.
+ */
+let syncTarget: { fb: WebGLFramebuffer; tex: WebGLTexture; px: Uint8Array } | null = null;
+function gpuWait(gl: WebGL2RenderingContext) {
+  if (!syncTarget || gl.isContextLost()) {
+    const tex = gl.createTexture()!, fb = gl.createFramebuffer()!;
+    const prevTex = gl.getParameter(gl.TEXTURE_BINDING_2D) as WebGLTexture | null, prevRead = gl.getParameter(gl.READ_FRAMEBUFFER_BINDING) as WebGLFramebuffer | null;
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, fb);
+    gl.framebufferTexture2D(gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, prevRead);
+    gl.bindTexture(gl.TEXTURE_2D, prevTex);
+    syncTarget = { fb, tex, px: new Uint8Array(4) };
+  }
+  const prev = gl.getParameter(gl.READ_FRAMEBUFFER_BINDING) as WebGLFramebuffer | null;
+  gl.bindFramebuffer(gl.READ_FRAMEBUFFER, syncTarget.fb);
+  gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, syncTarget.px);
+  gl.bindFramebuffer(gl.READ_FRAMEBUFFER, prev);
+}
 export function perfBegin(): number {
-  if (PERF.sync && PERF.gl) PERF.gl.finish();
+  if (PERF.sync && PERF.gl) gpuWait(PERF.gl);
   return perfNow();
 }
 export function perfEnd(stage: string, t0: number): number {
-  if (PERF.sync && PERF.gl) PERF.gl.finish();
+  if (PERF.sync && PERF.gl) gpuWait(PERF.gl);
   const d = perfNow() - t0;
   acc[stage] = (acc[stage] ?? 0) + d;
   cnt[stage] = (cnt[stage] ?? 0) + 1;

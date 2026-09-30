@@ -7,7 +7,7 @@ export const PERF_TRACE_FORMAT = 'aaavs-perf-trace';
 export const PERF_TRACE_VERSION = 1;
 /** Budget of one frame at 60 fps, ms. A frame whose total exceeds it is "over budget" (dropped at 60 Hz). */
 export const FRAME_BUDGET_MS = 1000 / 60;
-/** Mode of the instrumentation: 0 off, 1 CPU timestamps, 2 CPU timestamps with gl.finish() around each GL stage (distorts pipelining). */
+/** Mode of the instrumentation: 0 off, 1 CPU timestamps, 2 CPU timestamps with a GPU wait around each GL stage (distorts pipelining). */
 export type PerfMode = 0 | 1 | 2;
 
 export interface StageDef {

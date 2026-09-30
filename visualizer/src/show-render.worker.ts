@@ -41,7 +41,7 @@ let queue: Promise<void> = Promise.resolve();
 let verbose = false;
 let live: LiveAudioData | null = null;
 const debug = (s: string) => { if (verbose) console.info('[show worker]', s); };
-/** Stage timing (src/show/perf.ts, docs/PERFORMANCE.md): off unless the worker URL has ?perf=1|sync or a render message carries `perf`. */
+/** Stage timing (src/perf-worker.ts, docs/PERFORMANCE.md): off unless the worker URL has ?perf=1|sync or a render message carries `perf`. */
 const urlPerf: PerfMode = parsePerfMode(new URL(self.location.href).searchParams.get('perf'));
 /** Apply the mode of this render message (its `perf` field, else the URL default) and account the request's time in flight. */
 function perfFrameStart(perf: { readonly mode: PerfMode; readonly sent?: number } | undefined) {

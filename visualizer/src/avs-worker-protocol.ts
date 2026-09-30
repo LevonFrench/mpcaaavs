@@ -78,7 +78,7 @@ export interface AvsWorkerRenderMessage {
   /** Policy-resolved render size. */
   readonly width: number;
   readonly height: number;
-  /** Stage timing (src/show/perf.ts), honoured by the show worker only and absent (off) by default: mode 1 CPU timestamps, 2 with gl.finish() around GL stages; `sent` = the host's epoch time at postMessage. */
+  /** Stage timing (src/perf-worker.ts), honoured by the show worker only and absent (off) by default: mode 1 CPU timestamps, 2 with a GPU wait around GL stages; `sent` = the host's epoch time at postMessage. */
   readonly perf?: { readonly mode: 0 | 1 | 2; readonly sent?: number };
 }
 

@@ -54,7 +54,7 @@ export interface ShowRenderMessage {
   readonly dt?: number;
   /** Wait for the GPU before replying (timing runs). */
   readonly sync?: boolean;
-  /** Stage timing for this frame (src/show/perf.ts): mode 1 CPU timestamps, 2 with gl.finish() around GL stages; `sent` = the host's epoch time at postMessage. Absent: off. */
+  /** Stage timing for this frame (src/perf-worker.ts): mode 1 CPU timestamps, 2 with a GPU wait around GL stages; `sent` = the host's epoch time at postMessage. Absent: off. */
   readonly perf?: { readonly mode: 0 | 1 | 2; readonly sent?: number };
 }
 

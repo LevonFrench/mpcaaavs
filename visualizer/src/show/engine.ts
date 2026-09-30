@@ -223,7 +223,7 @@ export class Engine {
     this.loaded.set(Engine.keyOf(e), rec);
     try {
       const mod = await e.load();
-      setLayerOwner(e.id); // profiler names only (src/show/perf.ts): the constructor below is synchronous
+      setLayerOwner(e.id); // profiler names only (src/perf-worker.ts): the constructor below is synchronous
       let s: Scene;
       try { s = new mod.default({ ...this.ctx, audio: rec.audio!, id: e.id, params: e.params ?? {}, start: e.start, end: e.end }); } finally { setLayerOwner(''); }
       await s.init();

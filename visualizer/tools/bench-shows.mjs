@@ -21,7 +21,9 @@
 //                        preset workers at pane size: not a product path, it measures what the show engine would cost in panes). Default real,show
 //   --mv-plates a,b,c,d  plates shown by Multiview (default magi,radar,seele,berserk)
 //   --avs-dir <dir>      benchmark the heaviest .avs presets of a local catalogue (private data stays on the owner's machine); --avs-max N (default 6), --avs-size WxH
-//   --sync               GL-synchronised stage timing (gl.finish around GL stages): attributes GPU time to stages but distorts pipelining
+//   --avs-synth          also benchmark three synthetic heavy AVS presets built in code (SuperScope point clouds, line scopes, scopes + heavy blur): the repository has no
+//                        public AVS bank, so these are the only AVS presets it can bench without the owner's catalogue
+//   --sync               GL-synchronised stage timing (a GPU wait around GL stages): attributes GPU time to stages but distorts pipelining
 //   --no-stages          instrumentation off in the worker (pure frame timing; use for the cleanest A/B)
 //   --pacing raf|timer   how display ticks are generated (default: raf with --gpu or --headed, a 60 Hz timer in headless software-GL runs)
 //   --complete / --no-complete  force each frame's pixels to exist before it counts (a 1-pixel readback of the presented canvas). Default on for software GL,
@@ -62,6 +64,7 @@ const PERF_MODE = flag('no-stages') ? 0 : flag('sync') ? 2 : 1;
 const OUT = opt('out') ? resolve(opt('out')) : null;
 const COMPARE = opt('compare') ? resolve(opt('compare')) : null;
 const AVS_DIR = opt('avs-dir') ? resolve(opt('avs-dir')) : null;
+const AVS_SYNTH = flag('avs-synth');
 const EXE = opt('chromium', process.env.SHOW_CHROMIUM) || undefined;
 const FRAME_BUDGET_MS = 1000 / 60;
 const PACING = opt('pacing', flag('gpu') || flag('headed') ? 'raf' : 'timer');
@@ -93,7 +96,7 @@ const localBitmaps = { name: 'local-preset-assets', setup(b) {
 async function prepare(key, dir) {
   const out = join(BUILD_ROOT, key);
   mkdirSync(out, { recursive: true });
-  for (const w of ['show-render', 'nerv-render'].concat(AVS_DIR ? ['avs-render'] : [])) {
+  for (const w of ['show-render', 'nerv-render'].concat(AVS_DIR || AVS_SYNTH ? ['avs-render'] : [])) {
     await build({ entryPoints: [join(dir, `src/${w}.worker.ts`)], bundle: true, format: 'esm', target: 'es2022', outdir: out, entryNames: '[name]', loader: { '.wgsl': 'text' }, plugins: [localBitmaps], logLevel: 'warning' });
   }
   await build({ entryPoints: [join(VIS, 'tools/bench-shows-page.ts')], bundle: true, format: 'esm', target: 'es2022', outfile: join(out, 'page.js'), alias: { '@viz': join(dir, 'src') }, loader: { '.wgsl': 'text' }, plugins: [localBitmaps], logLevel: 'warning' });
@@ -135,7 +138,8 @@ const pageLogs = [];
 for (const s of sides) {
   const page = await browser.newPage({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: 1 });
   page.setDefaultTimeout(0);
-  page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') pageLogs.push(`[${s.name} ${m.type()}] ${m.text()}`); });
+  page.on('console', (m) => { if ((m.type() === 'error' || m.type() === 'warning') && !/willReadFrequently|Failed to load resource: the server responded with a status of 404/.test(m.text())) pageLogs.push(`[${s.name} ${m.type()}] ${m.text()}`); });
+  page.on('response', (r) => { if (r.status() === 404 && !/favicon/.test(r.url())) pageLogs.push(`[${s.name}] 404 ${r.url()}`); });
   page.on('pageerror', (e) => pageLogs.push(`[${s.name} pageerror] ${e.message}`));
   await page.goto(`${ORIGIN}/${s.key}/index.html`);
   await page.waitForFunction(() => window.benchReady);
@@ -206,7 +210,7 @@ function slotResult(side, task, w, rafMs, measuredSeconds) {
     if (v.length) extras[k] = summary(v);
   }
   return {
-    kind: task.kind, side: side.name, name: task.name, size: task.size, scale: task.scale, renderer: w.renderer ?? null, replySize: w.replySize ? `${w.replySize[0]}x${w.replySize[1]}` : null,
+    kind: task.kind, side: side.name, stagesMode: PERF_MODE === 2 ? 'sync' : PERF_MODE === 1 ? 'cpu' : 'off', name: task.name, size: task.size, scale: task.scale, renderer: w.renderer ?? null, replySize: w.replySize ? `${w.replySize[0]}x${w.replySize[1]}` : null,
     frames: n, seconds: r2(measuredSeconds), effectiveFps: r2(effectiveFps), ticks: w.ticks, missedTicks: w.missed, missedPct: r2(100 * w.missed / Math.max(1, w.ticks)),
     overBudget: over, overBudgetPct: r2(100 * over / Math.max(1, n)),
     loadMs: r2(median(w.loadMs)), firstFrameMs: r2(median(w.firstMs)), lit: r2(median(w.lit)),
@@ -289,7 +293,7 @@ function multiviewReal(side, task, runs) {
     stages: { 'host.rtt': summary(allRtt), 'host.present': summary(presents), ...(raf.length ? { 'host.raf.interval': summary(raf) } : {}), 'host.raf.busy': summary(frameMs), ...(completes.length ? { 'host.complete': summary(completes) } : {}) }, counters: {} };
   validateTrace(trace);
   return {
-    kind: 'multiview-real', side: side.name, name: task.name, size: task.size, scale: 1, count: task.count, panes, info: runs[0].info, surface: runs[0].surface ? runs[0].surface.join('x') : null,
+    kind: 'multiview-real', side: side.name, stagesMode: 'off', name: task.name, size: task.size, scale: 1, count: task.count, panes, info: runs[0].info, surface: runs[0].surface ? runs[0].surface.join('x') : null,
     frames: presentCount, seconds: r2(seconds), effectiveFps: r2(presentCount / Math.max(0.001, seconds)), paneFps: r2(panes.reduce((a, p) => a + p.fps, 0)),
     overBudget: over, overBudgetPct: r2(100 * over / Math.max(1, frameMs.length)),
     total: summary(allRtt), main: summary(frameMs), present: summary(presents), frameAge: summary(ages), raf: summary(raf),
@@ -299,8 +303,39 @@ function multiviewReal(side, task, runs) {
 }
 
 // ------------------------------------------------------------------ AVS (optional, local catalogue)
+const avsName = (f) => (AVS_DIR && f.startsWith(AVS_DIR) ? relative(AVS_DIR, f) : f.split(/[\\/]/).pop());
 function walkAvs(dir, out = []) {
   for (const n of readdirSync(dir)) { const p = join(dir, n); if (statSync(p).isDirectory()) walkAvs(p, out); else if (n.toLowerCase().endsWith('.avs')) out.push(p); }
+  return out;
+}
+
+/** Synthetic heavy AVS presets (SuperScope script, heavy Trans/Blur) written with the repository's own AVS writer. */
+async function synthAvs() {
+  const r = await build({ stdin: { contents: "export { serializeAvsPreset } from './src/avs/preset.ts';", resolveDir: VIS, loader: 'ts' }, bundle: true, format: 'esm', write: false, logLevel: 'silent' });
+  const { serializeAvsPreset } = await import(`data:text/javascript;base64,${Buffer.from(r.outputFiles[0].text).toString('base64')}`);
+  const enc = (v) => { const b = new Uint8Array(v.length + 1); for (let i = 0; i < v.length; i++) b[i] = v.charCodeAt(i) & 255; return b; };
+  const scope = (point, frame, beat, init, colors, lines) => {
+    const strings = [point, frame, beat, init].map(enc);
+    const bytes = new Uint8Array(1 + strings.reduce((a, v) => a + 4 + v.length, 0) + 12 + colors.length * 4), view = new DataView(bytes.buffer);
+    let o = 0; bytes[o++] = 1;
+    for (const v of strings) { view.setUint32(o, v.length, true); o += 4; bytes.set(v, o); o += v.length; }
+    view.setInt32(o, 0, true); o += 4; view.setInt32(o, colors.length, true); o += 4;
+    for (const c of colors) { view.setInt32(o, c, true); o += 4; }
+    view.setInt32(o, lines ? 1 : 0, true);
+    return bytes;
+  };
+  const blur = (mode) => { const b = new Uint8Array(8); new DataView(b.buffer).setInt32(0, mode, true); return b; };
+  const comp = (effectId, payload, k) => ({ effectId, apeId: null, payload, fileOffset: 0, path: String(k + 1), children: [], list: null, listCode: null });
+  const ast = (components) => ({ version: 2, header: 'Nullsoft AVS Preset 0.2\u001a', clearEveryFrame: false, components: components.map(([id, p], k) => comp(id, p, k)), byteLength: 0 });
+  const dots = scope('v=getosc(i,.05,0);a=i*6.2831853*(3+sin(t*.5));r=.25+.35*abs(v)+.1*sin(i*40+t);x=cos(a)*r*.75+sin(t+i*9)*.02;y=sin(a)*r;red=abs(sin(a+t));green=abs(cos(i*7+t));blue=v+.5', 't=t+.04', 'b=1', 'n=8192;t=0', [0xffffff], false);
+  const lines = (k) => scope(`v=getosc(i*.5,.1,${k % 2});x=i*2-1;y=v*.${k + 4}+sin(i*${k + 3}+t)*.15*${k + 1}`, 't=t+.05', 'n=4096', 'n=4096;t=0', [0xff0000 >> (8 * (k % 3)), 0xffffff], true);
+  const dir = join(BUILD_ROOT, 'avs-synth');
+  mkdirSync(dir, { recursive: true });
+  const out = [];
+  const write = (name, components) => { const f = join(dir, `${name}.avs`); writeFileSync(f, serializeAvsPreset(ast(components))); out.push(f); };
+  write('synth-dots-8k', [[36, dots]]);
+  write('synth-lines-4x4k', [0, 1, 2, 3].map((k) => [36, lines(k)]));
+  write('synth-dots-blur-heavy', [[36, dots], [6, blur(3)], [36, lines(2)], [6, blur(3)], [6, blur(3)]]);
   return out;
 }
 
@@ -320,8 +355,8 @@ try {
     done++;
     for (const r of produced) log(oneLine(r));
   }
-  if (AVS_DIR) {
-    const files = walkAvs(AVS_DIR);
+  if (AVS_DIR || AVS_SYNTH) {
+    const files = [...(AVS_DIR ? walkAvs(AVS_DIR) : []), ...(AVS_SYNTH ? await synthAvs() : [])];
     if (!files.length) log(`--avs-dir ${AVS_DIR}: no .avs files found`);
     else {
       avsFiles.push(...files);
@@ -334,7 +369,7 @@ try {
           const run = await pages.get('cand').evaluate((o) => window.bench.runSlots(o), { seconds: 1.5, warmup: 0.5, minFrames: 5, perfMode: 0, pacing: PACING, complete: COMPLETE,
             slots: [{ root: '/cand', file: 'avs-render.worker.js', plate: files[k], presetUrl: `/avsfile/${k}`, kind: 'avs', width: w, height: h, scale: 1, rect: { x: 0, y: 0, w: 1920, h: 1080 } }] });
           const f = run.workers[0].frames; probed.push({ k, ms: median(f.map((x) => x.rtt)), n: f.length });
-        } catch (e) { log(`  skipped ${relative(AVS_DIR, files[k])}: ${String(e.message).split('\n')[0]}`); }
+        } catch (e) { log(`  skipped ${avsName(files[k])}: ${String(e.message).split('\n')[0]}`); }
       }
       probed.sort((a, b) => b.ms - a.ms);
       for (const pr of probed.slice(0, Math.round(num('avs-max', 6)))) {
@@ -343,8 +378,8 @@ try {
           const out = new Map();
           for (const side of order(round, done)) {
             const run = await runSide(side, (page, root) => page.evaluate((o) => window.bench.runSlots(o), { seconds: SECONDS, warmup: WARMUP, minFrames: MIN_FRAMES, perfMode: 0, pacing: PACING, complete: COMPLETE,
-              slots: [{ root, file: 'avs-render.worker.js', plate: relative(AVS_DIR, files[pr.k]), presetUrl: `/avsfile/${pr.k}`, kind: 'avs', width: w, height: h, scale: 1, rect: { x: 0, y: 0, w: 1920, h: 1080 } }] }));
-            out.set(side.name, { task: { kind: 'avs', name: relative(AVS_DIR, files[pr.k]), size: `${w}x${h}`, scale: 1 }, run });
+              slots: [{ root, file: 'avs-render.worker.js', plate: avsName(files[pr.k]), presetUrl: `/avsfile/${pr.k}`, kind: 'avs', width: w, height: h, scale: 1, rect: { x: 0, y: 0, w: 1920, h: 1080 } }] }));
+            out.set(side.name, { task: { kind: 'avs', name: avsName(files[pr.k]), size: `${w}x${h}`, scale: 1 }, run });
           }
           rounds.push(out);
         }
@@ -368,7 +403,7 @@ const reportObj = {
     flag('gpu') ? 'Real GPU flags: numbers describe this machine.' : 'Software GL (SwiftShader) on a shared CPU: numbers are RELATIVE only (ratios between stages and plates, before/after comparisons).',
     COMPLETE ? 'total = request to the frame\'s pixels existing (reply plus a 1-pixel readback: includes the GPU-process work software GL does on the CPU); worker = frame.total from the worker (renderMs when stages are off), which excludes that GPU work.' : 'total = request to reply measured on the page (what the host sees); worker = frame.total from the worker (renderMs when stages are off).',
     'Frames are paced like the host: one request per display tick, a tick with a request outstanding is a missed frame. overBudget = frames whose total exceeds 16.7 ms.',
-    PERF_MODE === 2 ? 'Stage times are GL-synchronised (gl.finish around GL stages): they attribute GPU time to stages but serialise CPU and GPU, so the frame total is larger than a pipelined frame.' : 'Stage times are CPU timestamps: GL work queued in one stage is waited for in a later one (frame.fit, engine.blit, gl.upload.canvas). Use --sync to attribute it.',
+    PERF_MODE === 2 ? 'Stage times are GL-synchronised (a GPU wait, a 1x1 readPixels, around GL stages): they attribute GPU time to stages but serialise CPU and GPU, so the frame total is larger than a pipelined frame.' : 'Stage times are CPU timestamps: GL work queued in one stage is waited for in a later one (frame.fit, engine.blit, gl.upload.canvas). Use --sync to attribute it.',
   ],
   results: results.map(({ raw, ...r }) => r),
 };
