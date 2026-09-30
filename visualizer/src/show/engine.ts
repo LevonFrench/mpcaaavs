@@ -237,6 +237,15 @@ export class Engine {
 
   get duration() { return this.audio.duration; }
 
+  /** AAAVS: release the scenes, the GPU copies of the analysis and the WebGL context (the preset worker switching scale). */
+  dispose() {
+    for (const rec of this.loaded.values()) rec.scene?.dispose();
+    this.loaded.clear();
+    if (this.spectrum) disposeSpectrumTextures(this.spectrum);
+    this.renderer.dispose();
+    this.renderer.forceContextLoss();
+  }
+
   private frameFor(e: TimelineEntry, t: number, dt: number, seeked: boolean, preroll: boolean, under: THREE.Texture | null, tin: number, tout: number, au: AudioData = this.audio): Frame {
     // AAAVS: f.bar comes from the entry's (re-indexed) grid, so it stays "offset by 2" like songBar()
     const beat = au.beatAt(t), bar = au.barAt(t);

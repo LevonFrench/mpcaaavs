@@ -22,6 +22,7 @@ import type { AvsWorkerRequest, AvsWorkerRenderMessage, NervPlaybackFrame } from
 import { parseNervPreset } from './nerv-preset.ts';
 import { createNervLegacyRenderer, drawNervTransition, validateNervClock, NERV_SILENCE, type NervTransitionCache } from './nerv-legacy-render.ts';
 import { HARD_MAX_EDGE, HARD_MAX_PIXELS, fitWithin } from './render-resolution.ts';
+import { ShowScaleSwitch } from './show/scale-switch.ts';
 import { NERV_SCENE_CLASSES, NERV_SHOW, type NervPlateId } from './shows/nerv/index.ts';
 import { validateSongMap } from './song-map/validate.ts';
 import { synthesizeWave } from './song-map/synth-wave.ts';
@@ -196,21 +197,78 @@ async function presetRender(m: AvsWorkerRenderMessage) {
       drawFitted(out, width, height);
     }
     const bitmap = out.transferToImageBitmap(), elapsed = performance.now() - started;
-    post({ type: 'frame', generation: presetGen, sequence: m.sequence, bitmap, pcm: m.pcm, width, height, unsupported: 0, renderMs: elapsed > 0 ? elapsed : 0 }, [bitmap, m.pcm]);
+    post({ type: 'frame', generation: presetGen, sequence: m.sequence, bitmap, pcm: m.pcm, width, height, unsupported: 0, renderMs: elapsed > 0 ? elapsed : 0, engineScale: SCALE }, [bitmap, m.pcm]);
   } catch (error) {
     post({ type: 'error', generation: m.generation, message: String(error), fatal: true });
   }
 }
 
+// ------------------------------------------------------------------ output scale (show/scale-switch.ts)
+// The outer preset worker renders at its own scale until the governor's render size needs another one for
+// SWITCH_FRAMES requests; it then starts a copy of this script at that scale (?inner=1, which never switches), replays
+// the preset load, keeps answering until the copy is ready, and from then on relays to it.
+const INNER = params.get('inner') === '1';
+interface Inner { worker: Worker; scale: number; ready: boolean; generation: number }
+let active: Inner | null = null, pending: Inner | null = null, lastLoad: Extract<AvsWorkerRequest, { type: 'load' }> | null = null;
+const scaleSwitch = new ShowScaleSwitch(SCALE);
+
+function startInner(scale: number) {
+  if (!lastLoad) return;
+  const url = new URL(self.location.href);
+  url.searchParams.set('scale', String(scale)); url.searchParams.set('inner', '1');
+  const w = new Worker(url, { type: 'module' });
+  const rec: Inner = { worker: w, scale, ready: false, generation: lastLoad.generation };
+  w.onmessage = ({ data }) => {
+    const d = data as { type?: string; bitmap?: ImageBitmap; pcm?: ArrayBuffer };
+    if (rec === pending) {
+      if (d.type === 'ready') rec.ready = true;
+      else if (d.type === 'error') { w.terminate(); pending = null; scaleSwitch.settle(active?.scale ?? SCALE); }
+      return;
+    }
+    if (rec !== active) { d.bitmap?.close(); return; }
+    post(d, [...(d.bitmap ? [d.bitmap] : []), ...(d.pcm ? [d.pcm] : [])]);
+  };
+  w.onerror = () => { if (rec === pending) { pending = null; scaleSwitch.settle(active?.scale ?? SCALE); } };
+  const preset = lastLoad.preset.slice(0);
+  w.postMessage({ ...lastLoad, preset }, [preset]);
+  pending = rec;
+}
+
+function dropInners() {
+  for (const i of [active, pending]) i?.worker.terminate();
+  active = pending = null;
+}
+
+/** Route one preset-dialect message: load locally; renders locally or to the inner worker at the governor's scale. */
+async function presetMessage(m: AvsWorkerRequest) {
+  if (INNER) {
+    if (m.type === 'load') await presetLoad(m); else if (m.type === 'render') await presetRender(m); else legacy?.(m);
+    return;
+  }
+  if (m.type === 'load') {
+    dropInners(); scaleSwitch.settle(SCALE);
+    lastLoad = { ...m, preset: m.preset.slice(0) };
+    await presetLoad(m);
+    return;
+  }
+  if (m.type === 'render' && !legacy && m.generation === lastLoad?.generation) {
+    const want = scaleSwitch.observe(m.width, m.height);
+    if (want !== null && !pending && want !== (active?.scale ?? SCALE)) startInner(want);
+    if (pending?.ready) {
+      // switch: the copy has loaded the preset; the old renderer goes
+      active?.worker.terminate();
+      if (!active) { presetEngine?.dispose(); presetEngine = null; presetReady = false; presetKey = ''; }
+      active = pending; pending = null; scaleSwitch.settle(active.scale);
+    }
+  }
+  if (active) { active.worker.postMessage(m, m.type === 'render' ? [m.pcm] : []); return; }
+  if (m.type === 'render') await presetRender(m); else legacy?.(m);
+}
+
 scope.onmessage = ({ data }) => {
   const type = (data as { type?: unknown } | null)?.type;
   if (type === 'load' || type === 'render' || type === 'clear' || type === 'controls') {
-    queue = queue.then(async () => {
-      const m = data as AvsWorkerRequest;
-      if (m.type === 'load') await presetLoad(m);
-      else if (m.type === 'render') await presetRender(m);
-      else legacy?.(m);
-    });
+    queue = queue.then(() => presetMessage(data as AvsWorkerRequest));
     return;
   }
   queue = queue.then(async () => {

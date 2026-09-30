@@ -399,7 +399,8 @@ async function prepare(index: number, automatic: boolean, clockTarget?:ScenePhas
       new Promise<never>((_, reject) => { fetchTimer = window.setTimeout(() => reject(new Error('Preset fetch timed out')), 15000); }),
     ]).finally(() => clearTimeout(fetchTimer));
     if (current !== ticket) return;
-    const worker = new Worker(sceneWorkerLocation(preset.kind, import.meta.url), { type: 'module' });
+    const size = resolveSlot(index).render;
+    const worker = new Worker(sceneWorkerLocation(preset.kind, import.meta.url, size), { type: 'module' });
     const slot: Slot = { stashed:new Set(),stashPending:null,sentAt: 0, sized: '', audio: new AudioHold(), worker, generation: ++generation, index, busy: false, ready: false, bitmap: null, timeout: 0, dead: false, start:position,renderRevision:clockRevision,renderedPosition:NaN,lastAudio:latestAudio };
     slot.audio.push(latestAudio);
     prepared = slot;
@@ -418,7 +419,6 @@ async function prepare(index: number, automatic: boolean, clockTarget?:ScenePhas
         if (slot === prepared){if(pendingClock)syncSceneClock();else if(!autoPending)commit();}
       }
     };
-    const size = resolveSlot(index).render;
     const request: AvsWorkerRequest = { type: 'load', generation: slot.generation, preset: bytes.buffer as ArrayBuffer, bitmaps, width: size.width, height: size.height, gpuLane: 'exact' };
     worker.postMessage(request, [request.preset]);
   } catch (error) {

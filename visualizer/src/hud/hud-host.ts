@@ -7,6 +7,7 @@ import type { SourcePcm } from '../mpc-audio-stream.ts';
 import type { SceneTraits } from '../render-resolution.ts';
 import { builtinDefault, canonicalPackLabel, HUD_ROOT_LABEL } from '../mpc-folder-defaults.ts';
 import { defaultSceneTiming } from '../mpc-scene-clock.ts';
+import { showScaleFor } from '../show/scale-switch.ts';
 import type { PresetSetup } from '../mpc-setups.ts';
 import { TRANSITION_COUNT } from '../mpc-contract.ts';
 import { HudSignalBus, HUD_SIGNAL_OFFSETS, emptyHudSignals, packHudSignals, type HudSignalOptions } from './hud-signals.ts';
@@ -28,10 +29,12 @@ export function nervEngine(): 'show' | 'legacy' {
 }
 /** URL of a single-scene preset worker. NERV presets use the show engine unless the device opted out; the show worker
  *  reads its fonts from show-assets/ next to the page (it falls back to the Canvas2D scenes without WebGL2). */
-export function sceneWorkerLocation(kind: string | undefined, base: string): URL {
+export function sceneWorkerLocation(kind: string | undefined, base: string, render?: { width: number; height: number }): URL {
   const show = kind === 'nerv' && nervEngine() === 'show';
   const url = new URL('./' + (show ? 'show-render.worker.js' : sceneWorkerUrl(kind)), base);
   if (show && typeof document !== 'undefined') url.searchParams.set('assets', new URL('show-assets/', document.baseURI).href);
+  // the show engine starts at the scale the resolution governor's render size needs (it follows later changes itself)
+  if (show && render) url.searchParams.set('scale', String(showScaleFor(render.width, render.height)));
   return url;
 }
 /** Catalog metadata permits sizing before fetching the manifest. Pixel aspect is authored width/height. */
