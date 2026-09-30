@@ -86,7 +86,9 @@ function serve(root) {
 }
 
 async function openBrowser() {
-  return chromium.launch({ headless: true, args: BROWSER_ARGS });
+  // --chromium <path> (or SHOW_CHROMIUM) runs an installed Chromium when playwright-core's pinned build isn't downloaded
+  const executablePath = opt('chromium', process.env.SHOW_CHROMIUM) || undefined;
+  return chromium.launch({ headless: true, args: BROWSER_ARGS, executablePath });
 }
 async function newPage(browser, logs) {
   const page = await browser.newPage({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: 1 });
