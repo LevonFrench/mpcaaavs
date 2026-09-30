@@ -65,3 +65,5 @@ ipch
 
 # Private show assets ripped from owner-supplied game discs/ROMs. Local only: never commit, mirror or package.
 /show-assets-private/
+# The hosts read packs next to the page (visualizer/), so the same folder is private there too.
+/visualizer/show-assets-private/

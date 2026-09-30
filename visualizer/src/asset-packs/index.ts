@@ -5,3 +5,4 @@ export { ASSET_PACK_ROOT, assetPackUrl, isPackId, isPackPath, packPathProblem } 
 export { AssetPackMissingError, fetchPackSource, memoryPackSource, type AssetPackSource } from './source.ts';
 export { loadAssetPack, loadAssetPackOrNull, type AtlasDecoder, type LoadOptions, type LoadResult } from './loader.ts';
 export { drawGlyphs, drawNineSlice, drawSprite, drawStandIn, hashString, spriteSource, type DrawOptions, type SpriteContext, type SpriteSlot, type SpriteSource, type TextOptions } from './draw.ts';
+export { drawExamplePlate, EXAMPLE_FONT, EXAMPLE_SLOTS } from './example-plate.ts';
