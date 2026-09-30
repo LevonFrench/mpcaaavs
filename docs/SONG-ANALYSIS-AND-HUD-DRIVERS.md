@@ -1,6 +1,6 @@
 # Song analysis and reusable HUD drivers
 
-Status: proposed architecture, reviewed against the current source on 2026-09-28. This document does not mean an on-load scanner or automatic section detection has been implemented. No models were installed and no audio files or tags were modified for this review.
+Status: proposed architecture, reviewed against the current source on 2026-09-28. A CPU song map (chunked worker scan, progressive revisions, cache, live fallback, `SongMapClock`) is now implemented; see `docs/SONG-MAP.md` for what exists, the native bridge additions it still needs and what is unverified. The rest of this document remains the design. No models were installed and no audio files or tags were modified for this review.
 
 ## Decision
 
