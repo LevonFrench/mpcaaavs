@@ -4,8 +4,9 @@
 //
 // Semantics follow bizarro/evangelion's AudioData (MIT): beat and bar indices are continuous, are 0 at
 // the first beat/downbeat, interpolate linearly between explicit timestamps (so tempo changes need no
-// global BPM) and extrapolate with the nearest local period outside the grid. The map carries no meter,
-// so a bar is the span between explicit downbeats and beatInBar assumes four beats per bar.
+// global BPM) and extrapolate with the nearest local period outside the grid. A bar is the span between
+// explicit downbeats; the meter is the map's optional `beatsPerBar` (absent: four beats per bar).
+import { beatsPerBarOf } from './meter.ts';
 import type { SectionRole, SongMapJSON, SongMapSection } from './types.ts';
 
 export interface SectionPosition {
@@ -29,13 +30,11 @@ export interface Boundary {
 export interface BarPosition {
   /** Continuous bar index (0 at the first downbeat, negative before it). */
   readonly bar: number;
-  /** Continuous beat within the bar, 0 <= beatInBar < 4. */
+  /** Continuous beat within the bar, 0 <= beatInBar < beatsPerBar. */
   readonly beatInBar: number;
   /** 0..1 through the bar. */
   readonly phase: number;
 }
-
-const BEATS_PER_BAR = 4;
 
 /** Number of entries <= t. */
 function upperBound(list: readonly number[], t: number): number {
@@ -75,12 +74,15 @@ export class SongMapClock {
   private readonly downbeats: readonly number[];
   private readonly sections: readonly SongMapSection[];
   private readonly beatPeriod: number;
+  /** Beats per bar of the map (its `beatsPerBar`, 4 when absent). */
+  readonly beatsPerBar: number;
 
   constructor(map: SongMapJSON, revision = 0, coverage?: readonly (readonly [number, number])[]) {
     if (!Number.isInteger(revision) || revision < 0) throw new RangeError('Invalid revision');
     this.map = map; this.revision = revision; this.coverage = coverage ?? null;
     this.beats = map.beats; this.downbeats = map.downbeats; this.sections = map.sections;
     this.beatPeriod = map.bpm > 0 ? 60 / map.bpm : .5;
+    this.beatsPerBar = beatsPerBarOf(map.beatsPerBar);
   }
 
   get duration(): number { return this.map.duration; }
@@ -131,17 +133,17 @@ export class SongMapClock {
   timeOfBeat(beat: number): number { return timeOf(this.beats, beat, this.beatPeriod); }
   /** Continuous bar index from downbeats (0 at the first downbeat). Without downbeats, four beats per bar. */
   barAt(t: number): number {
-    if (this.downbeats.length >= 2) return indexAt(this.downbeats, t, this.beatPeriod * BEATS_PER_BAR);
-    return this.beatAt(t) / BEATS_PER_BAR;
+    if (this.downbeats.length >= 2) return indexAt(this.downbeats, t, this.beatPeriod * this.beatsPerBar);
+    return this.beatAt(t) / this.beatsPerBar;
   }
   timeOfBar(bar: number): number {
-    if (this.downbeats.length >= 2) return timeOf(this.downbeats, bar, this.beatPeriod * BEATS_PER_BAR);
-    return this.timeOfBeat(bar * BEATS_PER_BAR);
+    if (this.downbeats.length >= 2) return timeOf(this.downbeats, bar, this.beatPeriod * this.beatsPerBar);
+    return this.timeOfBeat(bar * this.beatsPerBar);
   }
   /** Bar, beat inside the bar and phase, from the downbeat grid. */
   barPosition(t: number): BarPosition {
     const bar = this.barAt(t), phase = bar - Math.floor(bar);
-    return { bar, beatInBar: Math.min(BEATS_PER_BAR - 1e-9, phase * BEATS_PER_BAR), phase };
+    return { bar, beatInBar: Math.min(this.beatsPerBar - 1e-9, phase * this.beatsPerBar), phase };
   }
   /** Nearest beat time to t. */
   nearestBeat(t: number): number { return this.timeOfBeat(Math.round(this.beatAt(t))); }

@@ -26,6 +26,8 @@ export function validateSongMap(j: unknown, bin?: Partial<SongMapBinary> | null)
   times('beats', m.beats, m.duration);
   times('downbeats', m.downbeats, m.duration);
   if (m.bar0 !== undefined && !finite(m.bar0)) throw new Error('song map: invalid bar0');
+  // Optional meter: an out-of-range value is an error (a reader would silently fall back to 4 for it).
+  if (m.beatsPerBar !== undefined && (!Number.isInteger(m.beatsPerBar) || m.beatsPerBar < 2 || m.beatsPerBar > 12)) throw new Error('song map: invalid beatsPerBar');
   if (!Array.isArray(m.sections)) throw new Error('song map: sections must be an array');
   let prevEnd = -Infinity;
   for (const s of m.sections) {

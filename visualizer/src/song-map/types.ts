@@ -12,6 +12,9 @@ export interface SongMapJSON {
   fps: number;
   beats: number[];
   downbeats: number[];
+  /** Beats between two downbeats (the meter: 3 for a waltz). Optional and additive: absent means 4, and every reader must work without it.
+   *  Only integers from 2 to 12 are honoured (src/song-map/meter.ts `beatsPerBarOf`). `confidence.downbeat` covers the bar phase, not the meter. */
+  beatsPerBar?: number;
   bar0?: number;
   sections: SongMapSection[];
   features: Record<SongMapFeature, number[]>;

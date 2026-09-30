@@ -2,13 +2,15 @@
 //
 // Before a song map exists (the background scan is still running, or the source is a stream), a show still
 // needs an AudioData. LiveAudioData is one built from:
-//  - a tempo-only grid: beats every 60/bpm s from `firstBeat`, a downbeat every 4 beats, and a neutral arrangement
+//  - a tempo-only grid: beats every 60/bpm s from `firstBeat`, a downbeat every `beatsPerBar` beats (4 unless the host's clock says
+//    otherwise: 3 for a waltz, see song-map/meter.ts), and a neutral arrangement
 //    (intro 4 bars, groove, outro 4 bars) so planShow() opens on the intro plate and closes on the outro plate;
 //  - live AvsAudioFrames pushed as they are played (push(t, frame)): 100 fps envelopes, a 64-band mel spectrogram and
 //    12-bin chroma from the AVS spectrum bytes, the waveform, and kick / snare / hat onsets (AVS beat flag and band flux).
 //
 // Plates read it through the same API as a song map (env, mel, chroma, waveAt, hit, events, onsets, beatAt, barAt).
-// Onsets not heard yet are predicted on the grid (a kick on every beat, a snare on 2 and 4, a hat on every off-beat),
+// Onsets not heard yet are predicted on the grid (a kick on every beat, a snare on the backbeats of the meter: 2 and 4 in 4/4,
+// 2 and 3 in 3/4, see `backbeats()` in song-map/meter.ts; a hat on every off-beat),
 // so plates that schedule their story from the onsets of their window when they are built (magi's vote, the alarms)
 // still have one; each push replaces the predictions up to its time with what was detected. Other data not heard yet
 // reads as silence: future envelopes, spectrum and waveform, the bass pitch and vocal onsets (psycho's scope bank,
@@ -16,6 +18,7 @@
 // pushes produces is deterministic; a live source is not a pure function of media time, which is the point of the
 // song map that replaces this.
 import type { AvsAudioFrame } from '../avs/types.ts';
+import { backbeats, beatsPerBarOf } from '../song-map/meter.ts';
 import type { SongMapJSON, SongMapSection } from '../song-map/types.ts';
 import { AudioData } from './audio.ts';
 
@@ -32,6 +35,9 @@ export interface LiveClock {
   maxSeconds?: number;
   /** Media time of the first analysis frame (a window around the playing scene). Default 0. */
   origin?: number;
+  /** Beats per bar (the host clock grid's `beatsPerBar`): whole numbers 2..12, anything else reads as 4. The grid's downbeats, the
+   *  neutral arrangement and the predicted backbeat snares follow it. Default 4. */
+  beatsPerBar?: number;
 }
 
 const FPS = 100;
@@ -50,11 +56,11 @@ const clamp01 = (x: number) => (x < 0 ? 0 : x > 1 ? 1 : x);
 /** The tempo grid and neutral arrangement of a live clock (no analysis data). */
 export function liveSongMap(c: LiveClock): SongMapJSON {
   const duration = Math.max(1, c.duration), bpm = Math.min(400, Math.max(20, c.bpm));
-  const period = 60 / bpm;
+  const period = 60 / bpm, perBar = beatsPerBarOf(c.beatsPerBar);
   const b0 = (((c.firstBeat ?? 0) % period) + period) % period;
   const beats: number[] = [];
   for (let t = b0; t < duration; t += period) beats.push(+t.toFixed(6));
-  const downbeats = beats.filter((_, i) => i % 4 === 0);
+  const downbeats = beats.filter((_, i) => i % perBar === 0);
   const sections: SongMapSection[] = [];
   const nb = downbeats.length;
   if (nb >= 16) {
@@ -63,7 +69,7 @@ export function liveSongMap(c: LiveClock): SongMapJSON {
     sections.push({ name: 'outro', role: 'outro', start: downbeats[nb - 4]!, end: duration, energy: 0.3 });
   } else sections.push({ name: 'live', role: 'groove', start: 0, end: duration, energy: 0.6 });
   return {
-    version: 1, duration, bpm, fps: FPS, beats, downbeats, bar0: downbeats[0], sections,
+    version: 1, duration, bpm, fps: FPS, beats, downbeats, ...(perBar !== 4 ? { beatsPerBar: perBar } : {}), bar0: downbeats[0], sections,
     features: { rms: [], low: [], mid: [], high: [], vocal: [], drums: [], bass: [], other: [] },
     onsets: { kick: [], snare: [], hat: [], vocal: [] },
     spectrum: { frames: 0, mel: MEL, chroma: 12, fmin: FMIN, fmax: FMAX },
@@ -103,10 +109,12 @@ export class LiveAudioData extends AudioData {
   /** Index where each onset list's grid predictions start (detected onsets come before it). */
   private readonly predFrom = { kick: 0, snare: 0, hat: 0 };
   private readonly windowEnd: number;
+  private readonly backbeat: readonly number[];
 
   constructor(clock: LiveClock) {
     const map = liveSongMap(clock);
     super(map);
+    this.backbeat = backbeats(this.beatsPerBar);
     this.sampleRate = clock.sampleRate ?? 44100;
     this.origin = Math.max(0, Math.min(map.duration, clock.origin ?? 0));
     const seconds = Math.max(1, Math.min(map.duration - this.origin, clock.maxSeconds ?? 1200));
@@ -130,7 +138,7 @@ export class LiveAudioData extends AudioData {
     }
   }
 
-  /** Replace the grid predictions with predictions after t (kick every beat, snare on 2 and 4, hat on the off-beats). */
+  /** Replace the grid predictions with predictions after t (kick every beat, snare on the backbeats of the meter, hat on the off-beats). */
   private predict(t: number) {
     const beats = this.map.beats, half = 30 / this.bpm;
     for (const k of ['kick', 'snare', 'hat'] as const) this.onsets[k]!.length = this.predFrom[k];
@@ -138,8 +146,9 @@ export class LiveAudioData extends AudioData {
       const b = beats[i]!;
       if (b > this.windowEnd) break;
       if (b > t) {
-        this.onsets.kick!.push([b, i % 4 === 0 ? 0.85 : 0.6]);
-        if (i % 2 === 1) this.onsets.snare!.push([b, 0.65]);
+        const inBar = i % this.beatsPerBar;
+        this.onsets.kick!.push([b, inBar === 0 ? 0.85 : 0.6]);
+        if (this.backbeat.includes(inBar)) this.onsets.snare!.push([b, 0.65]);
       }
       if (b + half > t && b + half <= this.windowEnd) this.onsets.hat!.push([b + half, 0.35]);
     }
