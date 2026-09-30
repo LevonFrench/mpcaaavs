@@ -236,7 +236,11 @@ function startInner(scale: number) {
     if (rec !== active) { d.bitmap?.close(); return; }
     post(d, [...(d.bitmap ? [d.bitmap] : []), ...(d.pcm ? [d.pcm] : [])]);
   };
-  w.onerror = () => { if (rec === pending) { pending = null; scaleSwitch.settle(active?.scale ?? SCALE); } };
+  w.onerror = (e) => {
+    if (rec === pending) { pending = null; scaleSwitch.settle(active?.scale ?? SCALE); }
+    // the renderer answering the host died: say so, so the host can fail the preset instead of waiting for a frame
+    else if (rec === active) post({ type: 'error', generation: rec.generation, message: `show renderer at scale ${rec.scale} failed: ${e.message}`, fatal: true });
+  };
   if (lastPack) sendPack(w, lastPack);
   const preset = lastLoad.preset.slice(0);
   w.postMessage({ ...lastLoad, preset }, [preset]);

@@ -40,9 +40,14 @@ window.run = async ({ plate, frames, clockFor, width, height, query = '', sizeFo
   const w = new Worker('./show-render.worker.js?assets=' + encodeURIComponent(new URL('/show-assets/', location.href).href) + query, { type: 'module' });
   const replies = [];
   let wake = null;
-  w.onmessage = ({ data }) => { replies.push(data); wake?.(); };
+  w.onmessage = ({ data }) => { trail.push(data.type === 'dbg' ? data.message : data.type + ':' + (data.sequence ?? '')); if (data.type === 'dbg') { console.log('progress DBG ' + data.message); return; } replies.push(data); wake?.(); };
   w.onerror = (e) => { replies.push({ type: 'error', message: e.message }); wake?.(); };
-  const next = (pred) => new Promise((res) => { const f = () => { const r = replies.find(pred); if (r) { replies.splice(replies.indexOf(r), 1); res(r); } else wake = f; }; f(); });
+  const trail = [];
+  const next = (pred) => new Promise((res) => {
+    // a stalled worker comes back as an error with the last messages, instead of hanging the tool
+    const dog = setTimeout(() => res({ type: 'error', message: 'no reply in 30 s; last messages: ' + JSON.stringify(trail.slice(-8)) }), 30000);
+    const f = () => { const r = replies.find(pred); if (r) { clearTimeout(dog); replies.splice(replies.indexOf(r), 1); res(r); } else wake = f; }; f();
+  });
   const preset = await (await fetch('/nerv-presets/' + plate + '.nerv')).arrayBuffer();
   w.postMessage({ type: 'load', generation: 1, preset, bitmaps: [], width, height, gpuLane: 'exact' }, [preset]);
   const ready = await next((r) => r.type === 'ready' || r.type === 'error');
@@ -59,6 +64,7 @@ window.run = async ({ plate, frames, clockFor, width, height, query = '', sizeFo
     if (r.type === 'error') return { error: r.message };
     if (r.sequence !== k) return { error: 'frame for sequence ' + r.sequence + ' answered request ' + k };
     scales.push([k, rw, r.width, r.engineScale ?? 0]);
+    if (sizeFor && k % 25 === 0) console.log('progress frame ' + k + ' request ' + rw + ' answered ' + r.width + ' scale ' + r.engineScale + ' ' + r.renderMs.toFixed(0) + ' ms');
     const es = r.engineScale ?? 0; if (seen[es] === undefined || (seen.back === undefined && es === 1 && seen[2] !== undefined)) { if (es === 1 && seen[2] !== undefined) seen.back = k; else seen[es] = k; }
     ms.push(r.renderMs);
     last?.bitmap.close(); last = r;
@@ -91,14 +97,15 @@ const grid = { offset: 0.37, beatsPerBar: 4, bpm: BPM };
 const scene = `(k) => { const t = ${S0} + k / 60 + ${4 * BAR}; return { time: t, localTime: t - ${S0}, progress: (t - ${S0}) / ${8 * BAR}, bpm: ${BPM}, seed: 7, grid: ${JSON.stringify(grid)}, sceneStart: ${S0}, sceneEnd: ${S1} }; }`;
 const fade = `(k) => { const t = ${S1} + 0.2 + k / 60; return { time: t, localTime: t - ${S1}, progress: (t - ${S1}) / ${8 * BAR}, bpm: ${BPM}, seed: 7, grid: ${JSON.stringify(grid)}, sceneStart: ${S1}, sceneEnd: ${S1 + 8 * BAR}, previousScene: 'magi', previousSceneStart: ${S0}, previousSceneEnd: ${S1}, previousTime: t, previousLocalTime: t - ${S0}, blend: 0.5, transitionMode: 1, transitionBeats: 4, fadeSeconds: 2 }; }`;
 const results = [];
+const ONLY = opt('only') ? opt('only').split(',') : null;
 async function session(args, cases) {
   const browser = await chromium.launch({ headless: true, executablePath: exe, args });
   try {
     const page = await browser.newPage();
     const logs = [];
-    page.on('console', (m) => logs.push(m.text()));
+    page.on('console', (m) => { logs.push(m.text()); if (m.text().startsWith('progress')) console.log(m.text()); });
     await page.goto(url); await page.waitForFunction(() => window.ready);
-    for (const c of cases) {
+    for (const c of cases.filter((c) => !ONLY || ONLY.includes(c.name))) {
       const r = await page.evaluate((o) => window.run(o), c.run);
       if (r.error) throw new Error(`${c.name}: ${r.error}\n${logs.join('\n')}`);
       const f = join(OUT, `${c.name}.png`);
