@@ -62,3 +62,6 @@ ipch
 # publication; remove this line then (docs/design/CONTRACT.md C-28, Q30).
 /visualizer/hud-presets/
 /visualizer/hud-presets.private/
+
+# Private show assets ripped from owner-supplied game discs/ROMs. Local only: never commit, mirror or package.
+/show-assets-private/
