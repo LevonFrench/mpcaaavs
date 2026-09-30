@@ -1,12 +1,12 @@
 # NERV show: upstream vs port contact sheets
 
 Each sheet shows bizarro/evangelion (MIT) on the left and the AAAVS show engine port on the right, at the same
-song times from the reference fixture (). Both render at 1920x1080 in
+song times from the reference fixture (`visualizer/tools/fixtures/nerv-reference`). Both render at 1920x1080 in
 headless Chromium with SwiftShader software WebGL. Both use the same synthesized waveform
-(, written to upstream's  by ),
+(`src/song-map/synth-wave.ts`, written to upstream's `data/wave.bin` by `tools/make-nerv-fixture.mjs --upstream-wave`),
 because the song itself is not in either repository. Sheets are downscaled JPGs.
 
-Reproduce (from ):
+Reproduce (from `visualizer/`):
 
     node tools/make-nerv-fixture.mjs <evangelion checkout> --upstream-wave <evangelion checkout>/data/wave.bin
     SHOW_CHROMIUM=<chromium> node tools/render-show-stills.mjs --plates --per 3 --compare <evangelion checkout> --out <dir>
@@ -74,7 +74,7 @@ MAE is the mean absolute error per channel. px>24 is the share of pixels where a
   (berserk 暴走, end 終劇, sync 同調率), and everything else in those frames (layout, glitches, meters, scopes, timers)
   matches.
 - **Neutral names.** Franchise words (for example the "EVANGELION" prefix in berserk's status header) are passed as
-  show params and default to empty in public builds. See  in .
+  show params and default to empty in public builds. See `ShowParams.unit` in `src/show/protocol.ts`.
 
 Neither reference is the original video render. Upstream's own look depends on macOS fonts, and the scopes read a
 synthesized waveform, not the song.
