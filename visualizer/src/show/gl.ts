@@ -2,8 +2,8 @@
 // GL plumbing on top of three.js: HDR render targets, fullscreen shader passes,
 // a texture compositor and Canvas2D layers uploaded as textures.
 import * as THREE from 'three';
-import { GLSL_COMMON } from './glsl/common.ts';
-import { SCALE } from './scale.ts';
+import { GLSL_COMMON, rebuildGlslCommon } from './glsl/common.ts';
+import { SCALE, setScaleValue } from './scale.ts';
 import { createCanvas } from './canvas.ts';
 
 export { SCALE };
@@ -11,8 +11,19 @@ export { SCALE };
 export const W = 1920;
 export const H = 1080;
 /** Physical (output) size: the logical canvas times SCALE (`?scale=2` → 3840x2160). */
-export const PW = W * SCALE;
-export const PH = H * SCALE;
+export let PW = W * SCALE;
+export let PH = H * SCALE;
+
+/**
+ * AAAVS: change the output scale for engines, passes, render targets and sprites built from now on (the preset worker
+ * disposes its engine first and builds a new one; nothing built before follows). Shader text, PW/PH and the shared
+ * GLSL are rebuilt here; everything else reads SCALE when it is constructed.
+ */
+export function setShowScale(s: number) {
+  setScaleValue(s);
+  PW = W * SCALE; PH = H * SCALE;
+  rebuildGlslCommon();
+}
 
 /**
  * Supersampling shared across motion-blur sub-frames. Shaders that supersample internally with the

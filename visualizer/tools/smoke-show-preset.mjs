@@ -121,9 +121,8 @@ await session(['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--igno
   { name: 'magi-forced-canvas2d', run: { plate: 'magi', frames: 10, clockFor: scene, width: 1280, height: 720, query: '&renderer=canvas2d' }, check: (r) => { assert.equal(r.renderer, 'canvas2d', 'forced fallback'); assert.ok(r.lit > 0.05, 'the Canvas2D fallback draws'); } },
   { name: 'psycho-fade-from-magi', run: { plate: 'psycho', frames: 30, clockFor: fade, width: 1280, height: 720 }, check: (r) => assert.ok(r.lit > 0.05, 'the crossfade draws') },
   // the resolution governor moves to native 4K, then back to 1080p: the worker follows with its engine scale
-  // (the copy at the new scale loads fonts and builds its scenes in the background while the old renderer answers; this
-  // loop is unpaced, so the governor script follows the switch: 4K until scale 2 answers (+40 frames), then 1080p
-  // until scale 1 answers again (+20 frames))
+  // (the worker rebuilds its engine at the new scale after the debounce; the governor script follows the switch: 4K until
+  // scale 2 answers (+40 frames), then 1080p until scale 1 answers again (+20 frames))
   { name: 'magi-governor-4k', run: { plate: 'magi', frames: 4000, clockFor: scene, width: 1280, height: 720,
     sizeFor: '(k, seen) => { if (k < 20) return [1280, 720]; if (seen[2] === undefined || k < seen[2] + 40) return [3840, 2160]; if (seen.back !== undefined && seen.done === undefined) seen.done = seen.back + 20; return [1920, 1080]; }' }, check: (r) => {
     const at = (k) => r.scales.find((x) => x[0] === k);

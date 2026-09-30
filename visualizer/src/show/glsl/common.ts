@@ -8,7 +8,7 @@ const v3 = (c: [number, number, number]) => `vec3(${c.map((x) => x.toFixed(5)).j
  * Shared GLSL (ES 3.0) prepended to every FSPass. Also importable into custom three.js
  * ShaderMaterials. Palette colours are LINEAR RGB.
  */
-export const GLSL_COMMON = /* glsl */ `
+const buildCommon = () => /* glsl */ `
 #define PI 3.14159265359
 #define TAU 6.28318530718
 // Output scale: physical px per logical (1920x1080) px. gl_FragCoord, fwidth and dFdx are in
@@ -172,3 +172,6 @@ vec3 heat(float x) {
   return mix(c, vec3(1.0, 0.9, 0.93), smoothstep(0.8, 1.0, x));
 }
 `;
+/** AAAVS: rebuilt by gl.ts setShowScale (the text depends on SCALE); FSPass reads it when a pass is constructed. */
+export let GLSL_COMMON = buildCommon();
+export function rebuildGlslCommon() { GLSL_COMMON = buildCommon(); }

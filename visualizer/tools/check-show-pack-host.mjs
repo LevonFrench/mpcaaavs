@@ -386,7 +386,6 @@ try {
   ok(/createHostShowPacks\(\{ source: id => fetchPackSource\(id\) \}\)/.test(host), 'the MPC host reads the pack beside the page');
   ok(/aaavsShowPacks=createHostShowPacks\(\{source:id=>httpPackSource\(id\)\}\)/.test(player), 'the Player reads the pack through its library server');
   ok(/m\.type === 'show-pack'[\s\S]{0,400}?receiveShowPack\(m\)/.test(worker) && worker.indexOf("m.type === 'show-pack'") < worker.indexOf("m.generation !== generation"), 'the show worker stores the pack before its generation gate');
-  ok(/m\.type === 'show-pack'[\s\S]{0,300}?sendPack\(i\.worker, m\)/.test(worker) && /if \(lastPack\) sendPack\(w, lastPack\);\s*const preset = lastLoad\.preset/.test(worker), 'copies at another scale get the pack, before their preset load');
   ok(/sceneWorker:\(kind,size\)=>\{[^\n]*isShowWorkerLocation\(url\)\)showPacks\.attach\(worker\)/.test(host), 'Multiview lanes on the show engine get the pack');
   for (const f of ['tools/build-mpc.mjs', 'tools/build-standalone.mjs']) ok(!/show-assets-private|copy|cp\(/.test(read(f)), `${f} never copies or names private packs`);
   for (const f of ['src/show/pack-setting.ts', 'src/show/pack-host.ts', 'src/show/pack-registry.ts', 'tools/show-pack-server.mjs']) ok(!/Math\.random|Date\.now|new Date\(/.test(read(f)), `${f} has no clock or randomness`);

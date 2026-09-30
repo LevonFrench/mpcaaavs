@@ -11,10 +11,10 @@
  * Dialects: src/show/protocol.ts (show-init / show-render). */
 import { Engine, type TimelineEntry } from './show/engine.ts';
 import { AudioData } from './show/audio.ts';
-import { PW, PH, SCALE } from './show/gl.ts';
+import { PW, PH, SCALE, setShowScale } from './show/gl.ts';
 import { setAssetBase } from './show/canvas.ts';
 import { planShow, type PlannedPlate } from './show/plan.ts';
-import { validateShowRequest, type ShowPackMessage, type ShowAudioMessage, type ShowInitMessage, type ShowPlanEntry, type ShowRenderMessage } from './show/protocol.ts';
+import { validateShowRequest, type ShowAudioMessage, type ShowInitMessage, type ShowPlanEntry, type ShowRenderMessage } from './show/protocol.ts';
 import { LiveAudioData } from './show/live.ts';
 import { presetWindow, type PresetEntry } from './show/preset-window.ts';
 import { loadEngineFonts } from './show/engine.ts';
@@ -22,7 +22,7 @@ import type { AvsWorkerRequest, AvsWorkerRenderMessage, NervPlaybackFrame } from
 import { parseNervPreset } from './nerv-preset.ts';
 import { createNervLegacyRenderer, drawNervTransition, validateNervClock, NERV_SILENCE, type NervTransitionCache } from './nerv-legacy-render.ts';
 import { HARD_MAX_EDGE, HARD_MAX_PIXELS, fitWithin } from './render-resolution.ts';
-import { ShowScaleSwitch, showScaleFor, SWITCH_FRAMES } from './show/scale-switch.ts';
+import { ShowScaleSwitch } from './show/scale-switch.ts';
 import { NERV_SCENE_CLASSES, NERV_SHOW, type NervPlateId } from './shows/nerv/index.ts';
 import { validateSongMap } from './song-map/validate.ts';
 import { synthesizeWave } from './song-map/synth-wave.ts';
@@ -33,7 +33,7 @@ const scope = self as unknown as {
   postMessage(message: unknown, transfer?: Transferable[]): void;
 };
 
-const canvas = new OffscreenCanvas(PW, PH);
+let canvas = new OffscreenCanvas(PW, PH);
 let engine: Engine | null = null;
 let entries: TimelineEntry[] = [];
 let generation = -1;
@@ -205,81 +205,32 @@ async function presetRender(m: AvsWorkerRenderMessage) {
 }
 
 // ------------------------------------------------------------------ output scale (show/scale-switch.ts)
-// The outer preset worker renders at its own scale until the governor's render size needs another one for
-// SWITCH_FRAMES requests; it then starts a copy of this script at that scale (?inner=1, which never switches), replays
-// the preset load, keeps answering until the copy is ready, and from then on relays to it.
-const INNER = params.get('inner') === '1';
-interface Inner { worker: Worker; scale: number; ready: boolean; generation: number }
-let active: Inner | null = null, pending: Inner | null = null, lastLoad: Extract<AvsWorkerRequest, { type: 'load' }> | null = null;
+// The engine renders at the scale the host's resolution governor needs. When the governor settles on a size that needs
+// another scale for SWITCH_FRAMES requests, the engine is disposed and rebuilt in this worker at the new scale (one slow
+// frame while its plate is rebuilt; never two WebGL contexts at once). Show-dialect workers keep the scale of their URL.
 const scaleSwitch = new ShowScaleSwitch(SCALE);
-let lastPack: ShowPackMessage | null = null;
-/** A copy of a show-pack message (the original's buffers stay with this worker's registry). */
-function sendPack(w: Worker, m: ShowPackMessage) {
-  const manifest = m.manifest?.slice(0), atlases = m.atlases ? Object.fromEntries(Object.entries(m.atlases).map(([k, v]) => [k, v.slice(0)])) : undefined;
-  w.postMessage({ ...m, manifest, atlases }, [...(manifest ? [manifest] : []), ...Object.values(atlases ?? {})]);
-}
-let pendingAway = 0; // consecutive requests that no longer want the pending copy's scale
 
-function startInner(scale: number) {
-  if (!lastLoad) return;
-  const url = new URL(self.location.href);
-  url.searchParams.set('scale', String(scale)); url.searchParams.set('inner', '1');
-  const w = new Worker(url, { type: 'module' });
-  const rec: Inner = { worker: w, scale, ready: false, generation: lastLoad.generation };
-  w.onmessage = ({ data }) => {
-    const d = data as { type?: string; bitmap?: ImageBitmap; pcm?: ArrayBuffer };
-    if (rec === pending) {
-      if (d.type === 'ready') rec.ready = true;
-      else if (d.type === 'error') { w.terminate(); pending = null; scaleSwitch.settle(active?.scale ?? SCALE); }
-      return;
-    }
-    if (rec !== active) { d.bitmap?.close(); return; }
-    post(d, [...(d.bitmap ? [d.bitmap] : []), ...(d.pcm ? [d.pcm] : [])]);
-  };
-  w.onerror = (e) => {
-    if (rec === pending) { pending = null; scaleSwitch.settle(active?.scale ?? SCALE); }
-    // the renderer answering the host died: say so, so the host can fail the preset instead of waiting for a frame
-    else if (rec === active) post({ type: 'error', generation: rec.generation, message: `show renderer at scale ${rec.scale} failed: ${e.message}`, fatal: true });
-  };
-  if (lastPack) sendPack(w, lastPack);
-  const preset = lastLoad.preset.slice(0);
-  w.postMessage({ ...lastLoad, preset }, [preset]);
-  pending = rec;
+function switchScale(scale: number) {
+  try { presetEngine?.dispose(); } catch { /* the context is going away either way */ }
+  presetEngine = null; presetReady = false; presetKey = ''; clocks.clear();
+  setShowScale(scale);
+  canvas = new OffscreenCanvas(PW, PH); // a fresh canvas: the old one's context was lost with the old engine
+  presetEngine = new Engine(canvas as unknown as HTMLCanvasElement, () => presetEntries);
+  scaleSwitch.settle(SCALE);
 }
 
-function dropInners() {
-  for (const i of [active, pending]) i?.worker.terminate();
-  active = pending = null;
-}
-
-/** Route one preset-dialect message: load locally; renders locally or to the inner worker at the governor's scale. */
+/** One preset-dialect message; renders first let the governor's size choose the engine scale. */
 async function presetMessage(m: AvsWorkerRequest) {
-  if (INNER) {
-    if (m.type === 'load') await presetLoad(m); else if (m.type === 'render') await presetRender(m); else legacy?.(m);
-    return;
-  }
-  if (m.type === 'load') {
-    dropInners(); scaleSwitch.settle(SCALE);
-    lastLoad = { ...m, preset: m.preset.slice(0) };
-    await presetLoad(m);
-    return;
-  }
-  if (m.type === 'render' && !legacy && m.generation === lastLoad?.generation) {
-    const want = scaleSwitch.observe(m.width, m.height), now = showScaleFor(m.width, m.height);
-    // a copy the governor has since settled away from (another scale, or back to the current one) is abandoned
-    pendingAway = pending && now !== pending.scale ? pendingAway + 1 : 0;
-    if (pending && ((want !== null && want !== pending.scale) || pendingAway >= SWITCH_FRAMES)) { pending.worker.terminate(); pending = null; pendingAway = 0; scaleSwitch.settle(active?.scale ?? SCALE); }
-    if (want !== null && !pending && want !== (active?.scale ?? SCALE)) startInner(want);
-    // switch once the copy has loaded the preset, and only while the governor still wants its scale
-    if (pending?.ready && now === pending.scale) {
-      // switch: the copy has loaded the preset; the old renderer goes
-      active?.worker.terminate();
-      if (!active) { try { presetEngine?.dispose(); } catch { /* the context is going away either way */ } presetEngine = null; presetReady = false; presetKey = ''; }
-      active = pending; pending = null; scaleSwitch.settle(active.scale);
+  if (m.type === 'load') { scaleSwitch.settle(SCALE); await presetLoad(m); return; }
+  if (m.type === 'render') {
+    if (!legacy && presetEngine && m.generation === presetGen) {
+      const want = scaleSwitch.observe(m.width, m.height);
+      if (want !== null) switchScale(want);
     }
+    await presetRender(m);
+    return;
   }
-  if (active) { active.worker.postMessage(m, m.type === 'render' ? [m.pcm] : []); return; }
-  if (m.type === 'render') await presetRender(m); else legacy?.(m);
+  legacy?.(m);
 }
 
 scope.onmessage = ({ data }) => {
@@ -296,12 +247,7 @@ scope.onmessage = ({ data }) => {
     try {
       const m = validateShowRequest(data);
       gen = m.generation;
-      if (m.type === 'show-pack') { // host-wide, never dropped by a show generation; copies at another scale get it too
-        lastPack = m;
-        for (const i of [active, pending]) if (i) sendPack(i.worker, m);
-        debug(`asset pack ${(await receiveShowPack(m)).status}`);
-        return;
-      }
+      if (m.type === 'show-pack') { debug(`asset pack ${(await receiveShowPack(m)).status}`); return; } // host-wide, never dropped by a show generation
       if (m.type === 'show-init') { generation = m.generation; await init(m); return; }
       if (m.generation !== generation) return;
       if (m.type === 'show-audio') { pushAudio(m); return; }
