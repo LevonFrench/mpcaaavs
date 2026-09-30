@@ -59,8 +59,8 @@ audio(4.86,true,{epoch:2,frames});tick();assert.ok(Math.max(...lastRender(active
 // Native Auto-off must cancel a not-yet-ready timeline scene.
 audio(6.1,true,{epoch:2});await flush();const canceled=fetches.at(-1),before=workers.length;
 msg({type:'settings',enabled:false,shuffle:false});canceled.resolve();await flush();assert.equal(workers.length,before);assert.equal(active.dead,false);
-msg({type:'settings',enabled:true,shuffle:false});await flush();active=await load();assert.ok(nodes.get('#preset').textContent.includes('radar'));
-// NERV transport and arbitrary choices queue at the next clock boundary.
+msg({type:'settings',enabled:true,shuffle:false,queueQuantize:2});await flush();active=await load();assert.ok(nodes.get('#preset').textContent.includes('radar'));
+// With a quantized manual queue (next bar), NERV transport and arbitrary choices queue at the next clock boundary (default is immediate).
 msg({type:'next'});await flush();const superseded=await load();assert.ok(nodes.get('#preset').textContent.includes('radar'),'preloading must not change the active scene');
 msg({type:'next'});await flush();assert.equal(fetches.at(-1).p.scene,'seele','repeated Next steps from the pending choice');
 const replaced=fetches.at(-1);actions.load(13);await flush();replaced.resolve();await flush();

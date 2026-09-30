@@ -20,7 +20,7 @@ const region = (text, name, body) => {
   if (!re.test(text)) throw new Error(`PERFORMANCE.md lacks the ${name} markers`);
   return text.replace(re, `$1\n${body}\n$2`);
 };
-const current = readFileSync(DOC, 'utf8');
+const current = readFileSync(DOC, 'utf8').split(String.fromCharCode(13, 10)).join(String.fromCharCode(10));
 let next = region(current, 'STAGE-TABLE', stageTable);
 if (existsSync(BASELINE) && !check) {
   const tables = execFileSync(process.execPath, [join(VIS, 'tools/bench-report.mjs'), BASELINE], { encoding: 'utf8', maxBuffer: 1 << 26 });

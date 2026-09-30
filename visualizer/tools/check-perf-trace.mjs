@@ -113,7 +113,7 @@ for (const c of PERF_COUNTERS) ok(emitted.counter.has(c.name), `counter ${c.name
 
 // ------------------------------------------------------------------ 3. off by default, guarded, reversible
 {
-  const guarded = [join(VIS, 'src/show-render.worker.ts'), ...files.filter((f) => f.includes('/src/show/'))];
+  const guarded = [join(VIS, 'src/show-render.worker.ts'), ...files.filter((f) => f.split(String.fromCharCode(92)).join('/').includes('/src/show/'))];
   let lines = 0;
   for (const f of guarded) {
     const src = readFileSync(f, 'utf8').split('\n');

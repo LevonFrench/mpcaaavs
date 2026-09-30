@@ -99,7 +99,8 @@ try{
   h=await harness(true);
   const timing={enabled:true,bpm:120,offsetSeconds:0,barsPerScene:1,seed:89};
   assert.throws(()=>h.actions.activate(h.setup([0,1,2,3,4,5,6,7,8],{minimumRating:3,enabled:true},timing)),/unavailable/);
-  h.actions.activate(h.setup([0,1,2,3,4,5,6,8],{minimumRating:3,enabled:true},timing));await h.flush();await h.finish();
+  // A quantized manual queue (here: next bar) queues scene-kind picks on the clock; the default (immediate) is checked below.
+  h.actions.activate(h.setup([0,1,2,3,4,5,6,8],{minimumRating:3,enabled:true,queueQuantize:2},timing));await h.flush();await h.finish();
   const allowed=new Set([3,4,5,8]);
   async function seek(position){const before=h.fetches.length;h.audio(position);await h.flush();if(h.fetches.length>before)await h.finish();h.tick();const worker=h.active();if(worker.requests.at(-1)?.type==='render')worker.send('frame');assert.ok(allowed.has(h.actions.current()),'scene clock stays in the filtered pool');return structuredClone(h.lastRender(worker).nerv);}
   const first=await seek(4.25),firstIndex=h.actions.current();await seek(27.25);const repeated=await seek(4.25);assert.equal(h.actions.current(),firstIndex);assert.deepEqual(repeated,first,'seeded filtered clock repeats identical scene timing after seeks');
@@ -113,6 +114,14 @@ try{
   // Making every remaining clock candidate ineligible must not crash cue validation
   // or silently select a low-rated preset.
   for(const index of allowed)h.mark(index,true);await h.flush();count=h.fetches.length;h.audio(40.25);h.tick();await h.flush();assert.equal(h.fetches.length,count);assert.match(h.nodes.get('#timing').textContent,/no eligible/i);
+  h.close();
+
+  // Default manual queue (immediate): a manual pick in a scene set switches now instead of waiting for the next scene boundary.
+  h=await harness(true);
+  h.actions.activate(h.setup([0,1,2,3,4,5,6,8],{minimumRating:3,enabled:true},{enabled:true,bpm:120,offsetSeconds:0,barsPerScene:8,seed:89}));await h.flush();await h.finish();
+  {const start=h.actions.current(),pick=[3,4,5,8].find(i=>i!==start);h.actions.load(pick);await h.flush();await h.finish();
+   assert.equal(h.actions.current(),pick,'immediate manual queue switches without waiting for a scene boundary');
+   assert.ok(!h.nodes.get('#timing').textContent.includes('queued'),'immediate pick is not shown as queued');}
   h.close();
 }finally{Math.random=originalRandom;}
 console.log('Host selection: thresholds 0–5, unrated/broken exclusions, empty/current-only pools, committed marking/write queues, pending-rating cancellation, adaptive/setup shuffle, seeded clock seek/replay and cue pruning PASS');
