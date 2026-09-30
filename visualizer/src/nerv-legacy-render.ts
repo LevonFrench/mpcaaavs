@@ -29,6 +29,32 @@ function plate(clock: NervPlaybackFrame, audio: AvsAudioFrame, scene: NervSceneI
   return {scene,time,localTime,progress,bpm:clock.bpm,seed:clock.seed,audio,
     ...(clock.grid ? {grid:clock.grid} : {}),...(typeof start === 'number' ? {sceneStart:start} : {}),...(typeof end === 'number' ? {sceneEnd:end} : {})};
 }
+/** The AvsTransition of a clocked NERV change, kept between frames (keyed mode:seed:beats:boundary:reduced). */
+export interface NervTransitionCache { transition: AvsTransition | null; key: string }
+
+/**
+ * Composite a clocked NERV change from `oldCanvas` (the previous plate) to `nextCanvas` into `ctx` with the host's
+ * transition (style, beats, boundary, accent, reduced motion) at `clock.blend`, as the NERV worker always has.
+ */
+export function drawNervTransition(ctx: OffscreenCanvasRenderingContext2D, oldCanvas: OffscreenCanvas, nextCanvas: OffscreenCanvas, clock: NervPlaybackFrame, audio: AvsAudioFrame, width: number, height: number, cache: NervTransitionCache): void {
+  const mode = clock.transitionMode ?? 1, seed = (clock.transitionSeed ?? clock.seed) >>> 0, blend = clock.blend ?? 1;
+  const beats = clock.transitionBeats ?? 4, boundary = (clock.transitionBoundary ?? 0) as 0 | 1 | 2 | 3, reduced = clock.transitionReduced === true;
+  const key = `${mode}:${seed}:${beats}:${boundary}:${reduced ? 1 : 0}`;
+  if (!cache.transition || key !== cache.key) {
+    cache.transition = new AvsTransition(mode,{seed,createCanvas:()=>new OffscreenCanvas(1,1),context:{beatsTotal:beats,boundary,nervPair:true,reducedMotion:reduced},smooth:true});
+    cache.key = key;
+  }
+  if (blend <= 0 && mode !== TRANSITION_CUT) ctx.drawImage(oldCanvas,0,0,width,height);
+  else {
+    // Beat and bar phase come from the saved grid when the frame carries one, else from the legacy tempo (timingSignals is exact either way).
+    const signals = timingSignals(clock.time,clock.grid ?? null,clock.sceneStart ?? null,clock.sceneEnd ?? null,{bpm:Math.min(400,Math.max(20,clock.bpm)),localTime:clock.localTime});
+    const bpm = compileClockGrid(clock.grid)?.bpmAt(clock.time) ?? clock.bpm;
+    const env: Partial<TransitionEnv> = {bpm,beatPhase:signals.beatPhase,barPhase:signals.barPhase,beatsTotal:beats,level:transitionLevel(audio),
+      accent:clock.transitionAccent === 0 ? 0 : 1,reducedMotion:reduced,...(clock.fadeSeconds !== undefined ? {seconds:clock.fadeSeconds} : {})};
+    cache.transition.draw(ctx,oldCanvas,nextCanvas,blend,width,height,env);
+  }
+}
+
 /**
  * The NERV preset renderer of src/nerv-render.worker.ts (Canvas2D, src/nerv-scenes.ts) as a message handler, so the show
  * worker (src/show-render.worker.ts) can fall back to it when WebGL2 or the show engine is unavailable. `post` is the
@@ -37,7 +63,7 @@ function plate(clock: NervPlaybackFrame, audio: AvsAudioFrame, scene: NervSceneI
 export function createNervLegacyRenderer(post: (message: unknown, transfer?: Transferable[]) => void): (message: AvsWorkerRequest) => void {
   let generation = -1, scene: NervSceneId | null = null;
   let canvas: OffscreenCanvas | null = null, oldCanvas: OffscreenCanvas | null = null, nextCanvas: OffscreenCanvas | null = null;
-  let transition: AvsTransition | null = null, transitionKey = '';
+  const cache: NervTransitionCache = {transition:null,key:''};
   function surface(current: OffscreenCanvas | null, width: number, height: number): OffscreenCanvas {
     const result = current ?? new OffscreenCanvas(width,height);
     if (result.width !== width) result.width = width;
@@ -47,7 +73,7 @@ export function createNervLegacyRenderer(post: (message: unknown, transfer?: Tra
   /** Drop the transition-only state (both plate surfaces and the cached transition with its scratch surfaces). Zero-sized first, so the backing store goes now rather than at the next collection. */
   function release(): void {
     for (const c of [oldCanvas,nextCanvas]) if (c) { c.width = 0; c.height = 0; }
-    oldCanvas = nextCanvas = null; transition = null; transitionKey = '';
+    oldCanvas = nextCanvas = null; cache.transition = null; cache.key = '';
   }
   return (message: AvsWorkerRequest): void => {
     try {
@@ -64,31 +90,16 @@ export function createNervLegacyRenderer(post: (message: unknown, transfer?: Tra
       const ctx = canvas.getContext('2d',{alpha:false}); if (!ctx) throw Error('NERV canvas unavailable');
       const clock: NervPlaybackFrame = message.nerv ?? {time:0,localTime:0,progress:0,bpm:120,seed:1};
       validateNervClock(clock);
-      const mode = clock.transitionMode ?? 1, seed = (clock.transitionSeed ?? clock.seed) >>> 0;
       const audio = message.audio ?? NERV_SILENCE, previous = clock.previousScene, blend = clock.blend;
       // Reconstruct both sides from media time, including after a direct seek into a fade.
       // Sources remain separate from the output, so pushes never sample their own writes.
       if (previous && blend !== undefined && blend < 1) {
-        const beats = clock.transitionBeats ?? 4, boundary = (clock.transitionBoundary ?? 0) as 0 | 1 | 2 | 3, reduced = clock.transitionReduced === true;
         nextCanvas = surface(nextCanvas,width,height); oldCanvas = surface(oldCanvas,width,height);
         const next = nextCanvas.getContext('2d',{alpha:false}); if (!next) throw Error('NERV transition canvas unavailable');
         const old = oldCanvas.getContext('2d',{alpha:false}); if (!old) throw Error('NERV transition canvas unavailable');
         renderNervScene(next,width,height,plate(clock,audio,scene,clock.time,clock.localTime,clock.progress,clock.sceneStart,clock.sceneEnd));
         renderNervScene(old,width,height,plate(clock,audio,previous,clock.previousTime ?? clock.time,clock.previousLocalTime ?? clock.localTime,1,clock.previousSceneStart,clock.previousSceneEnd));
-        const key = `${mode}:${seed}:${beats}:${boundary}:${reduced ? 1 : 0}`;
-        if (!transition || key !== transitionKey) {
-          transition = new AvsTransition(mode,{seed,createCanvas:()=>new OffscreenCanvas(1,1),context:{beatsTotal:beats,boundary,nervPair:true,reducedMotion:reduced},smooth:true});
-          transitionKey = key;
-        }
-        if (blend <= 0 && mode !== TRANSITION_CUT) ctx.drawImage(oldCanvas,0,0,width,height);
-        else {
-          // Beat and bar phase come from the saved grid when the frame carries one, else from the legacy tempo (timingSignals is exact either way).
-          const signals = timingSignals(clock.time,clock.grid ?? null,clock.sceneStart ?? null,clock.sceneEnd ?? null,{bpm:Math.min(400,Math.max(20,clock.bpm)),localTime:clock.localTime});
-          const bpm = compileClockGrid(clock.grid)?.bpmAt(clock.time) ?? clock.bpm;
-          const env: Partial<TransitionEnv> = {bpm,beatPhase:signals.beatPhase,barPhase:signals.barPhase,beatsTotal:beats,level:transitionLevel(audio),
-            accent:clock.transitionAccent === 0 ? 0 : 1,reducedMotion:reduced,...(clock.fadeSeconds !== undefined ? {seconds:clock.fadeSeconds} : {})};
-          transition.draw(ctx,oldCanvas,nextCanvas,blend,width,height,env);
-        }
+        drawNervTransition(ctx,oldCanvas,nextCanvas,clock,audio,width,height,cache);
       } else {
         release();
         renderNervScene(ctx,width,height,plate(clock,audio,scene,clock.time,clock.localTime,clock.progress,clock.sceneStart,clock.sceneEnd));

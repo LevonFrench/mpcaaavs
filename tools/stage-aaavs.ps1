@@ -40,6 +40,8 @@ Assert-NoLinkedPath $destination
 New-Item -ItemType Directory -Force $destination | Out-Null
 Copy-Item -LiteralPath (Join-Path $appRoot 'visualizer\mpc.html') -Destination $destination
 Copy-Item -LiteralPath (Join-Path $appRoot 'visualizer\dist') -Destination $destination -Recurse -Force
+# The show engine's OFL fonts (NERV presets on the show engine); visualizer\show-assets\fonts\LICENSES.txt travels with them.
+Copy-Item -LiteralPath (Join-Path $appRoot 'visualizer\show-assets') -Destination $destination -Recurse -Force
 $collection = Join-Path $appRoot 'visualizer\avs presets'
 $targetCollection = Join-Path $destination 'avs presets'
 Assert-NoLinkedPath $targetCollection

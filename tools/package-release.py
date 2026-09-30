@@ -19,11 +19,14 @@ DOCUMENTS = (
     'docs/AVS-TRANSITIONS.md', 'docs/MPC-HC-UPSTREAM-README.md', 'docs/Compilation.md',
     'docs/Authors.txt', 'docs/HUD-PACKS.md',
 )
+# The show engine's bundled OFL fonts (staged next to mpc.html by tools/stage-aaavs.ps1), licenses included.
+SHOW_ASSETS = tuple(sorted(
+    path.relative_to(ROOT).as_posix() for path in (ROOT / 'visualizer/show-assets').rglob('*') if path.is_file()))
 RUNTIME_FILES = (
     f'{PRODUCT}.exe', 'visualizer/mpc.html', 'visualizer/dist/mpc-host.js',
     'visualizer/dist/avs-render.worker.js', 'visualizer/dist/nerv-render.worker.js',
-    'visualizer/dist/hud-render.worker.js',
-)
+    'visualizer/dist/hud-render.worker.js', 'visualizer/dist/show-render.worker.js',
+) + SHOW_ASSETS
 
 
 def no_links(path):

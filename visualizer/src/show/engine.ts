@@ -91,7 +91,11 @@ export class Engine {
   private blit: FSPass;
   private xfade: FSPass;
   private accum: FSPass;
-  private lastT = -1;
+  /** AAAVS: time of the last rendered frame (seek detection). The preset worker renders two plates per frame during a
+   *  crossfade, each on its own clock, and swaps this per plate. */
+  lastT = -1;
+  /** AAAVS: when set, only the timeline entries it accepts are composited (one plate of a crossfade at a time). */
+  filter: ((e: TimelineEntry) => boolean) | null = null;
   lastPost: PostParams = { ...DEFAULT_POST };
   errors: string[] = [];
   /** AAAVS: progress hook (init stages, scene construction). */
@@ -362,7 +366,7 @@ export class Engine {
   private composite(t: number, dt: number, seeked: boolean): { outTex: THREE.Texture; post: PostParams } {
     const r = this.renderer;
 
-    const active = this.timeline.filter((e) => t >= e.start && t < e.end).sort((a, b) => a.start - b.start);
+    const active = this.timeline.filter((e) => t >= e.start && t < e.end && (!this.filter || this.filter(e))).sort((a, b) => a.start - b.start);
     let post: PostParams = { ...DEFAULT_POST };
     let under: THREE.Texture | null = null;
     let outTex: THREE.Texture | null = null;

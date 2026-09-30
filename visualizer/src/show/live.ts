@@ -8,8 +8,11 @@
 //    12-bin chroma from the AVS spectrum bytes, the waveform, and kick / snare / hat onsets (AVS beat flag and band flux).
 //
 // Plates read it through the same API as a song map (env, mel, chroma, waveAt, hit, events, onsets, beatAt, barAt).
-// What is not known yet reads as silence: the future, the bass pitch and vocal onsets. Plates that precompute their
-// window at init (psycho's scope bank) see only what was pushed before they were built. The data a given sequence of
+// Onsets not heard yet are predicted on the grid (a kick on every beat, a snare on 2 and 4, a hat on every off-beat),
+// so plates that schedule their story from the onsets of their window when they are built (magi's vote, the alarms)
+// still have one; each push replaces the predictions up to its time with what was detected. Other data not heard yet
+// reads as silence: future envelopes, spectrum and waveform, the bass pitch and vocal onsets (psycho's scope bank,
+// built at init, sees only what was pushed before). The data a given sequence of
 // pushes produces is deterministic; a live source is not a pure function of media time, which is the point of the
 // song map that replaces this.
 import type { AvsAudioFrame } from '../avs/types.ts';
@@ -65,7 +68,7 @@ export function liveSongMap(c: LiveClock): SongMapJSON {
     onsets: { kick: [], snare: [], hat: [], vocal: [] },
     spectrum: { frames: 0, mel: MEL, chroma: 12, fmin: FMIN, fmax: FMAX },
     confidence: { tempo: 0.5, downbeat: 0, sections: 0 },
-    approximations: ['live', 'tempo-grid', 'downbeats', 'sections', 'bass_midi', 'vocal', 'drums', 'onsets'],
+    approximations: ['live', 'tempo-grid', 'downbeats', 'sections', 'bass_midi', 'vocal', 'drums', 'onsets', 'onsets-predicted'],
   };
 }
 
@@ -97,6 +100,9 @@ export class LiveAudioData extends AudioData {
   private readonly prevMel = new Float32Array(MEL);
   private readonly fluxMean = new Float32Array(3).fill(0.02);
   private readonly lastOnset = { kick: -1e9, snare: -1e9, hat: -1e9 };
+  /** Index where each onset list's grid predictions start (detected onsets come before it). */
+  private readonly predFrom = { kick: 0, snare: 0, hat: 0 };
+  private readonly windowEnd: number;
 
   constructor(clock: LiveClock) {
     const map = liveSongMap(clock);
@@ -111,6 +117,8 @@ export class LiveAudioData extends AudioData {
     this.waveRate = LIVE_WAVE_RATE;
     this.wave = new Float32Array(Math.ceil(seconds * LIVE_WAVE_RATE + 1) * 2);
     map.spectrum!.frames = this.capacityFrames;
+    this.windowEnd = this.origin + seconds;
+    this.predict(this.origin);
     map.wave = { rate: LIVE_WAVE_RATE, channels: 2, frames: this.wave.length >> 1 };
     // mel band edges on the AVS spectrum bytes (byte i ~ i * sampleRate / 1024 Hz)
     const m0 = hz2mel(FMIN), m1 = hz2mel(Math.min(FMAX, this.sampleRate / 2));
@@ -119,6 +127,21 @@ export class LiveAudioData extends AudioData {
       const lo = idx(mel2hz(m0 + ((m1 - m0) * b) / MEL)), hi = idx(mel2hz(m0 + ((m1 - m0) * (b + 1)) / MEL));
       this.bandLo[b] = Math.min(511, Math.max(0, lo));
       this.bandHi[b] = Math.min(511, Math.max(this.bandLo[b]!, hi - 1));
+    }
+  }
+
+  /** Replace the grid predictions with predictions after t (kick every beat, snare on 2 and 4, hat on the off-beats). */
+  private predict(t: number) {
+    const beats = this.map.beats, half = 30 / this.bpm;
+    for (const k of ['kick', 'snare', 'hat'] as const) this.onsets[k]!.length = this.predFrom[k];
+    for (let i = 0; i < beats.length; i++) {
+      const b = beats[i]!;
+      if (b > this.windowEnd) break;
+      if (b > t) {
+        this.onsets.kick!.push([b, i % 4 === 0 ? 0.85 : 0.6]);
+        if (i % 2 === 1) this.onsets.snare!.push([b, 0.65]);
+      }
+      if (b + half > t && b + half <= this.windowEnd) this.onsets.hat!.push([b + half, 0.35]);
     }
   }
 
@@ -138,14 +161,25 @@ export class LiveAudioData extends AudioData {
     const fi = Math.round((t - this.origin) * FPS);
     if (fi >= this.capacityFrames) return;
     if (this.lastT >= 0 && t < this.lastT - 0.05) {
-      for (const k of ['kick', 'snare', 'hat', 'vocal']) {
+      // seek back: drop the detections after t and predict again from t
+      for (const k of ['kick', 'snare', 'hat'] as const) {
         const l = this.onsets[k]!;
+        l.length = this.predFrom[k];
         while (l.length && l[l.length - 1]![0] >= t) l.pop();
+        this.predFrom[k] = l.length;
       }
+      this.predict(t);
       this.lastFrame = -1;
       this.lastOnset.kick = this.lastOnset.snare = this.lastOnset.hat = -1e9;
     }
     this.lastT = t;
+    // predictions up to now are superseded by what was heard
+    for (const k of ['kick', 'snare', 'hat'] as const) {
+      const l = this.onsets[k]!, p = this.predFrom[k];
+      let n = 0;
+      while (p + n < l.length && l[p + n]![0] <= t) n++;
+      if (n) l.splice(p, n);
+    }
 
     // spectrum: mean of both channels, AVS log-magnitude bytes (0..1)
     const sp = frame.spectrum;
@@ -205,7 +239,7 @@ export class LiveAudioData extends AudioData {
     const on = (kind: 'kick' | 'snare' | 'hat', s: number, gap: number) => {
       if (t - this.lastOnset[kind] < gap) return;
       this.lastOnset[kind] = t;
-      this.onsets[kind]!.push([t, clamp01(s)]);
+      this.onsets[kind]!.splice(this.predFrom[kind]++, 0, [t, clamp01(s)]);
     };
     if (frame.beat) on('kick', frame.beatLevel / (SAMPLES * 64), 0.1);
     const fl = [fSn, fHat];

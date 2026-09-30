@@ -83,13 +83,25 @@ eq(live.waveRate, LIVE_WAVE_RATE, 'live wave rate');
 for (const [t, f] of F) live.push(t, f);
 ok(live.revision === F.length, 'every push counts as a revision');
 
-const kicks = live.onsets.kick, beat = 60 / BPM;
+const lastT = F[F.length - 1][0];
+const kicks = live.onsets.kick.filter(([t]) => t <= lastT), beat = 60 / BPM;
 ok(kicks.length >= DUR / beat - 3 && kicks.length <= DUR / beat + 2, `kick onsets from the AVS beat detector: ${kicks.length} for ${DUR / beat} kicks`);
 for (const [t] of kicks) {
   const d = Math.min(t % beat, beat - (t % beat));
   ok(d < 0.06, `kick onset at ${t.toFixed(3)} is within 60 ms of a kick`);
 }
-ok(live.onsets.hat.length >= 4, `hat onsets detected: ${live.onsets.hat.length}`);
+ok(live.onsets.hat.filter(([t]) => t <= lastT).length >= 4, 'hat onsets detected');
+// the future is predicted on the grid: a kick on every beat, snares on 2 and 4, hats on the off-beats
+{
+  const future = (k) => live.onsets[k].filter(([t]) => t > lastT);
+  const grid = liveSongMap({ duration: 30, bpm: BPM }).beats;
+  eq(future('kick').map(([t]) => t), grid.filter((t) => t > lastT), 'predicted kicks on every future beat');
+  eq(future('snare').map(([t]) => t), grid.filter((t, i) => t > lastT && i % 2 === 1), 'predicted snares on 2 and 4');
+  ok(future('hat').every(([t]) => Math.abs(((t / beat) % 1) - 0.5) < 1e-6), 'predicted hats on the off-beats');
+  const fresh = new LiveAudioData({ duration: 30, bpm: BPM });
+  eq(fresh.events('kick', 10, 12).length, 4, 'before any audio a window already has its grid kicks');
+  ok(fresh.map.approximations.includes('onsets-predicted'), 'predictions are listed as approximations');
+}
 for (const k of ['kick', 'snare', 'hat']) {
   const l = live.onsets[k];
   for (let i = 1; i < l.length; i++) ok(l[i][0] > l[i - 1][0], `${k} onsets are sorted`);
@@ -144,7 +156,9 @@ eq(live.bassMidi(3), 0, 'bass pitch is unknown live');
   const before = a.onsets.kick.filter(([t]) => t < 3).length;
   const [t3, f3] = F.find(([t]) => t >= 3);
   a.push(t3, f3);
-  ok(a.onsets.kick.every(([t]) => t <= t3), 'seek back drops onsets after the new time');
+  const grid = new Set(liveSongMap({ duration: 30, bpm: BPM }).beats.map((t) => t.toFixed(6)));
+  ok(a.onsets.kick.filter(([t]) => t > t3).every(([t]) => grid.has(t.toFixed(6))), 'seek back: onsets after the new time are grid predictions again');
+  ok(a.onsets.kick.filter(([t]) => t > t3).length > 20, 'seek back: the future is predicted again');
   eq(a.onsets.kick.filter(([t]) => t < 3).length, before, 'seek back keeps earlier onsets');
 }
 
@@ -164,7 +178,7 @@ eq(live.bassMidi(3), 0, 'bass pitch is unknown live');
   eq(w.origin, 100, 'origin window');
   eq(w.capacityFrames, 3001, 'origin window capacity');
   for (const [t, f] of F) w.push(t + 100, f);
-  eq(w.onsets.kick.map(([t, s]) => [+(t - 100).toFixed(9), s]), live.onsets.kick.map(([t, s]) => [+t.toFixed(9), s]), 'origin: onsets are absolute media times');
+  eq(w.onsets.kick.filter(([t]) => t <= 100 + lastT).map(([t, s]) => [+(t - 100).toFixed(9), s]), kicks.map(([t, s]) => [+t.toFixed(9), s]), 'origin: detected onsets are absolute media times');
   for (const x of [0.5, 2.03, 4.51, 7.2]) {
     near(w.env('low', 100 + x), live.env('low', x), 1e-6, `origin: env at ${x}`);
     near(w.mel(100 + x, 3), live.mel(x, 3), 1e-6, `origin: mel at ${x}`);
