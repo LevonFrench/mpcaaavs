@@ -324,6 +324,14 @@ void AAAVSView::Tick(HWND parent, bool visible, bool playing, LONGLONG position,
     }
     if (!s->controller) return;
     ShowWindow(s->host, visible && !s->failed ? SW_SHOWNOACTIVATE : SW_HIDE);
+    if (visible && !s->failed) {
+        // Opening a file rebuilds the graph, and a renderer child created then (cover art is shown through the
+        // video renderer) lands above the visualizer and is disabled by OpenSetupVideo. A disabled window on top
+        // passes clicks to the artwork view, which turns them into play/pause. Keep the visualizer on top and enabled.
+        if (GetWindow(s->parent, GW_CHILD) != s->host)
+            SetWindowPos(s->host, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+        if (!IsWindowEnabled(s->host)) EnableWindow(s->host, TRUE);
+    }
     s->controller->put_IsVisible(visible && !s->failed);
     if (!s->ready) return;
     if (s->pending && GetTickCount64() - s->sent < 1000) return;
