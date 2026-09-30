@@ -100,6 +100,37 @@ way to use it without shipping it.
    fallback, and that release packaging (`tools/check-release-package.py`,
    `tools/package-release.py`) never includes `show-assets-private/`.
 
+## Task 5: sprite layer and choreographer (new branch `cloud/sprite-layer`, from `cloud/show-asset-packs` once task 3 has a loader)
+
+Implements the engine side of `docs/design/SPRITE-SHOW-KIT.md`. Packs arrive
+from a local pipeline as PNG atlases plus a manifest (roles, clips with verb,
+per-frame atlas rect, trim offset, foot anchor, duration in 60 Hz ticks, `big`
+flag, detached-part rects, optional indexed palettes).
+
+1. Sprite layer in the show engine: atlas upload, nearest-neighbour sampling,
+   per-frame anchoring and facing, palette swap via an index texture plus
+   palette texture, additive/screen blending for effects, drop shadows off.
+2. Pixel scaling policy: integer scaling of the game's native resolution with a
+   themed border by default; optional sharp-bilinear shader for non-integer fits.
+   Must stay crisp at 1080p and 4K.
+3. Clip playback per the kit's retiming rules: loops retime to beat multiples,
+   one-shots keep native tick timing and only their start shifts; hitstop
+   freezes of 4-12 ticks scaled by onset strength; shake and zoom through post.
+4. Motion models from the kit (straight, arc, sine, boomerang, homing, bounce,
+   spread, orbit, fall, rise, swoop, hover, pendulum) with musical parameters.
+5. Choreographer: maps song-map events to verbs per the kit's grammar, using
+   look-ahead so each clip's `big` frame lands exactly on its event; call and
+   response between performers; section role picks the plate mode. Sprite shows
+   perform and never simulate play: no win, loss, clear or game-over states.
+6. HUD-as-meters primitives driven by musical signals: bars with ghost drain,
+   segmented meters with MAX flash, digit counters and timers from pack digit
+   regions, banners as punctuation.
+7. A procedural test pack generated in code (stand-in actors, projectiles,
+   effects, HUD) so checks and stills run with no private files; checks that big
+   frames land on onsets within one tick and that loops stay beat-locked across
+   seeks.
+8. Still renderer support: plates using the test pack render at 1080p and 4K.
+
 ## Task 4: integration branch (after tasks 1 and 2 pass)
 
 Create `cloud/integration` from `aaavs-integration`, merge
