@@ -246,6 +246,8 @@ const management=new PresetManagement({catalog:()=>catalog,current:()=>multiView
   panel:mode=>bridge?.postMessage(`panel-state:${mode}`),close:()=>{bridge?.postMessage('panel-close');syncSceneClock();}});
 const multiView=new MultiViewSession({catalog:()=>catalog,presets:fetchLocalAvsPreset,bitmaps:loadPresetBitmaps,
   worker:url=>new Worker(new URL('./'+url,import.meta.url),{type:'module'}),
+  // NERV lanes render on the show engine (unless the device opted out), like the single-preset view
+  sceneWorker:(kind,size)=>new Worker(sceneWorkerLocation(kind,import.meta.url,size),{type:'module'}),
   view:()=>({width:canvas.clientWidth,height:canvas.clientHeight,dpr:devicePixelRatio||1}),display:()=>sizer.prefs,
   audio:()=>latestAudio,pcm:()=>pcm,hudFeed,position:()=>position,duration:()=>trackDuration,playing:()=>playing,
   visible:()=>hostVisible&&!document.hidden,reducedMotion:()=>reducedMotion,

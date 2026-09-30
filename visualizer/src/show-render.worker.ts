@@ -22,7 +22,7 @@ import type { AvsWorkerRequest, AvsWorkerRenderMessage, NervPlaybackFrame } from
 import { parseNervPreset } from './nerv-preset.ts';
 import { createNervLegacyRenderer, drawNervTransition, validateNervClock, NERV_SILENCE, type NervTransitionCache } from './nerv-legacy-render.ts';
 import { HARD_MAX_EDGE, HARD_MAX_PIXELS, fitWithin } from './render-resolution.ts';
-import { ShowScaleSwitch } from './show/scale-switch.ts';
+import { ShowScaleSwitch, showScaleFor, SWITCH_FRAMES } from './show/scale-switch.ts';
 import { NERV_SCENE_CLASSES, NERV_SHOW, type NervPlateId } from './shows/nerv/index.ts';
 import { validateSongMap } from './song-map/validate.ts';
 import { synthesizeWave } from './song-map/synth-wave.ts';
@@ -211,6 +211,7 @@ const INNER = params.get('inner') === '1';
 interface Inner { worker: Worker; scale: number; ready: boolean; generation: number }
 let active: Inner | null = null, pending: Inner | null = null, lastLoad: Extract<AvsWorkerRequest, { type: 'load' }> | null = null;
 const scaleSwitch = new ShowScaleSwitch(SCALE);
+let pendingAway = 0; // consecutive requests that no longer want the pending copy's scale
 
 function startInner(scale: number) {
   if (!lastLoad) return;
@@ -252,9 +253,13 @@ async function presetMessage(m: AvsWorkerRequest) {
     return;
   }
   if (m.type === 'render' && !legacy && m.generation === lastLoad?.generation) {
-    const want = scaleSwitch.observe(m.width, m.height);
+    const want = scaleSwitch.observe(m.width, m.height), now = showScaleFor(m.width, m.height);
+    // a copy the governor has since settled away from (another scale, or back to the current one) is abandoned
+    pendingAway = pending && now !== pending.scale ? pendingAway + 1 : 0;
+    if (pending && ((want !== null && want !== pending.scale) || pendingAway >= SWITCH_FRAMES)) { pending.worker.terminate(); pending = null; pendingAway = 0; scaleSwitch.settle(active?.scale ?? SCALE); }
     if (want !== null && !pending && want !== (active?.scale ?? SCALE)) startInner(want);
-    if (pending?.ready) {
+    // switch once the copy has loaded the preset, and only while the governor still wants its scale
+    if (pending?.ready && now === pending.scale) {
       // switch: the copy has loaded the preset; the old renderer goes
       active?.worker.terminate();
       if (!active) { presetEngine?.dispose(); presetEngine = null; presetReady = false; presetKey = ''; }
