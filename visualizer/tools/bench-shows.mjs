@@ -48,8 +48,9 @@ import { chromium } from 'playwright-core';
 const here = dirname(fileURLToPath(import.meta.url));
 const VIS = resolve(here, '..');
 const argv = process.argv.slice(2);
-const opt = (k, d) => { const i = argv.indexOf(`--${k}`); return i >= 0 && i + 1 < argv.length ? argv[i + 1] : d; };
-const opts = (k) => argv.flatMap((a, i) => (a === `--${k}` && i + 1 < argv.length ? [argv[i + 1]] : []));
+// `--k value` and `--k=value`; a value may itself start with `--` (Chromium flags after --browser-arg)
+const opts = (k) => argv.flatMap((a, i) => (a === `--${k}` ? (i + 1 < argv.length ? [argv[i + 1]] : []) : a.startsWith(`--${k}=`) ? [a.slice(k.length + 3)] : []));
+const opt = (k, d) => { const v = opts(k); return v.length ? v[0] : d; };
 const flag = (k) => argv.includes(`--${k}`);
 const num = (k, d) => { const v = Number(opt(k, d)); if (!Number.isFinite(v) || v < 0) throw new Error(`--${k} must be a number`); return v; };
 if (flag('help') || flag('h')) { console.log(readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').filter((l) => l.startsWith('//')).map((l) => l.slice(3)).join('\n')); process.exit(0); }

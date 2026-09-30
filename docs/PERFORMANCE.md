@@ -166,6 +166,7 @@ node tools/bench-shows.mjs --gpu --chromium "C:\Program Files\Google\Chrome\Appl
 node tools/bench-report.mjs bench.json > tables.md
 ```
 
+The first line of the output names the WebGL renderer the page got (`GL <vendor> / <renderer>`): check that it names your GPU and not SwiftShader or "Microsoft Basic Render" before trusting a run; if it does not, add `--browser-arg --use-angle=d3d11` (or `--browser-arg --use-gl=angle` and the matching `--use-angle`) and run again.
 Close other GPU-heavy programs first, leave the machine alone during a run, and run it twice: the second run shows the run-to-run spread.
 `npm install` (playwright-core, esbuild) is all it needs; the browser is the installed Chrome or Edge. Send `bench.json` back; it holds
 summaries, not per-frame traces.
