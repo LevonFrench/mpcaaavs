@@ -106,7 +106,7 @@ export class SongMapAnalyzer {
     const sections = analyzeSections({
       fps: FPS, duration, islands: derived.islands, downbeats: rhythm.downbeats, ...(rhythm.bar0 !== undefined ? { bar0: rhythm.bar0 } : {}),
       features: derived.features, kicks: derived.onsets.kick, snares: derived.onsets.snare, hats: derived.onsets.hat,
-      spec: derived.spec, specStride: S, chromaOffset: MEL_BANDS, downbeatConfidence: rhythm.confidence.downbeat,
+      spec: derived.spec, specStride: S, chromaOffset: MEL_BANDS, downbeatConfidence: rhythm.confidence.downbeat, bassMidi: derived.bassMidi,
     });
     const features = {} as Record<SongMapFeature, number[]>;
     for (const name of FEATURE_NAMES) features[name] = Array.from(derived.features[name], round3);

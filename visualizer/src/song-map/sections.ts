@@ -22,14 +22,17 @@ export interface SectionInput {
   readonly specStride: number;
   readonly chromaOffset: number;
   readonly downbeatConfidence: number;
+  /** Bass pitch per frame (MIDI, 0 = unvoiced). Optional: without it low-end presence falls back to the bass band level. */
+  readonly bassMidi?: Float32Array;
 }
 
 export interface SectionResult { readonly sections: SongMapSection[]; readonly confidence: number; readonly boundaries: number[] }
 
-interface Bar { start: number; end: number; beats: number; db: number; v: Float64Array; rms: number; low: number; bass: number; drums: number; high: number; kick: number; snare: number; hat: number }
+interface Bar { voiced: number; start: number; end: number; beats: number; db: number; v: Float64Array; rms: number; low: number; bass: number; drums: number; high: number; kick: number; snare: number; hat: number }
 interface Draft { a: number; b: number; start: number; end: number }
 
 const DENSE: SongMapFeature[] = ['rms', 'low', 'mid', 'high', 'drums', 'bass', 'other', 'vocal'];
+const BASS_MIDI_MAX = 47;   // below about 155 Hz: bass register
 const round3 = (x: number) => Math.round(x * 1000) / 1000;
 
 function countIn(list: readonly (readonly [number, number])[], t0: number, t1: number): number {
@@ -66,7 +69,9 @@ function bars(input: SectionInput, a: number, b: number): Bar[] {
       let s = 0; for (let f = f0; f < f1; f++) s += input.spec[f * input.specStride + input.chromaOffset + c]!;
       v[DENSE.length + 3 + c] = s / (f1 - f0) / 255;
     }
-    out.push({ start, end, beats, db: i === 0 ? firstEdge - 1 : dbIndex(start), v, rms: v[0]!, low: v[1]!, bass: v[5]!, high: v[3]!, drums: v[4]!, kick, snare, hat });
+    let voiced = 0;
+    if (input.bassMidi) { for (let f = f0; f < f1; f++) { const m = input.bassMidi[f] ?? 0; if (m > 0 && m <= BASS_MIDI_MAX) voiced++; } voiced /= f1 - f0; }
+    out.push({ voiced, start, end, beats, db: i === 0 ? firstEdge - 1 : dbIndex(start), v, rms: v[0]!, low: v[1]!, bass: v[5]!, high: v[3]!, drums: v[4]!, kick, snare, hat });
   }
   return out;
 }
@@ -105,9 +110,9 @@ function linearSlope(values: number[]): number {
   return sxy / sxx;
 }
 
-interface Stats { len: number; energy: number; drums: boolean; low: boolean; rising: boolean; roll: boolean; drumRate: number; snareRate: number; silent: boolean }
+interface Stats { voiced: number; drumLevel: number; bass: number; maxDrums: number; maxBass: number; len: number; energy: number; drums: boolean; low: boolean; rising: boolean; roll: boolean; drumRate: number; snareRate: number; silent: boolean }
 
-function stats(list: Bar[], d: Draft, maxDrums: number, maxBass: number): Stats {
+function stats(list: Bar[], d: Draft, maxDrums: number, maxBass: number, pitched: boolean): Stats {
   const span = list.slice(d.a, d.b);
   const avg = (f: (bar: Bar) => number) => span.reduce((s, bar) => s + f(bar) * bar.beats, 0) / Math.max(1e-9, span.reduce((s, bar) => s + bar.beats, 0));
   const energy = avg(bar => bar.rms), drumRate = avg(bar => bar.kick + bar.snare), drumLevel = avg(bar => bar.drums), bass = avg(bar => bar.bass);
@@ -117,9 +122,9 @@ function stats(list: Bar[], d: Draft, maxDrums: number, maxBass: number): Stats 
   const snareFirst = span.slice(0, half).reduce((s, bar) => s + bar.snare, 0) / half;
   const snareLast = span.slice(half).reduce((s, bar) => s + bar.snare, 0) / Math.max(1, span.length - half);
   return {
-    len: span.length, energy,
-    drums: drumRate >= .35 || drumLevel >= .45 * maxDrums,
-    low: bass >= .4 * maxBass,
+    drumLevel, bass, maxDrums, maxBass, voiced: avg(bar => bar.voiced), len: span.length, energy,
+    drums: drumRate >= .35 || avg(bar => bar.hat) >= .5 || drumLevel >= .7 * maxDrums,
+    low: pitched ? avg(bar => bar.voiced) >= .5 : bass >= .4 * maxBass,
     rising: rise >= .12,
     roll: snareLast >= .5 && snareLast >= 1.5 * snareFirst + .1,
     drumRate,
@@ -128,9 +133,9 @@ function stats(list: Bar[], d: Draft, maxDrums: number, maxBass: number): Stats 
   };
 }
 
-function label(list: Bar[], drafts: Draft[]): SectionRole[] {
+function label(list: Bar[], drafts: Draft[], pitched: boolean): SectionRole[] {
   const maxDrums = Math.max(1e-9, ...list.map(bar => bar.drums)), maxBass = Math.max(1e-9, ...list.map(bar => bar.bass));
-  const st = drafts.map(d => stats(list, d, maxDrums, maxBass));
+  const st = drafts.map(d => stats(list, d, maxDrums, maxBass, pitched));
   const n = st.length, last = n - 1;
   const maxE = Math.max(1e-9, ...st.map(s => s.energy));
   const full = st.map(s => s.drums && s.low);
@@ -204,7 +209,7 @@ function islandSections(input: SectionInput, a: number, b: number): { drafts: Dr
   const edges = [0, ...kept, n];
   const drafts: Draft[] = [];
   for (let i = 0; i + 1 < edges.length; i++) drafts.push({ a: edges[i]!, b: edges[i + 1]!, start: list[edges[i]!]!.start, end: list[edges[i + 1]! - 1]!.end });
-  const roles = label(list, drafts);
+  const roles = label(list, drafts, input.bassMidi !== undefined);
   // A build is one story into its drop: consecutive build sections merge.
   for (let i = drafts.length - 1; i > 0; i--) {
     if (roles[i] === 'build' && roles[i - 1] === 'build') {
