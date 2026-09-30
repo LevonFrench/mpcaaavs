@@ -77,7 +77,7 @@ function serve(root) {
     const srv = createServer((req, rsp) => {
       const p = decodeURIComponent(new URL(req.url, 'http://x').pathname);
       const f = join(root, p === '/' ? '/.tmp/show-stills/index.html' : p);
-      if (!f.startsWith(root) || !existsSync(f) || statSync(f).isDirectory()) { rsp.writeHead(404); rsp.end('not found'); return; }
+      if (!f.startsWith(root) || !existsSync(f) || statSync(f).isDirectory()) { if (flag('verbose')) console.log(`404 ${p}`); rsp.writeHead(404); rsp.end('not found'); return; }
       rsp.writeHead(200, { 'content-type': MIME[extname(f)] ?? 'application/octet-stream', 'cache-control': 'no-store' });
       rsp.end(readFileSync(f));
     });

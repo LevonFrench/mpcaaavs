@@ -77,7 +77,9 @@ export async function loadFonts(): Promise<void> {
       fontSet().add(ff);
     }),
   );
-  await fontSet().ready;
+  // AAAVS: every face above is loaded before it is added. In a worker, WorkerGlobalScope.fonts.ready can stay
+  // pending forever (headless Chromium never settles it), so only a page waits for it.
+  if (typeof document !== 'undefined') await fontSet().ready;
 }
 
 /** opentype.js Font for outline work (lazy-parsed). */
