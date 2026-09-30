@@ -33,7 +33,7 @@ const scope = self as unknown as {
   postMessage(message: unknown, transfer?: Transferable[]): void;
 };
 
-let canvas = new OffscreenCanvas(PW, PH);
+const canvas = new OffscreenCanvas(PW, PH);
 let engine: Engine | null = null;
 let entries: TimelineEntry[] = [];
 let generation = -1;
@@ -211,11 +211,12 @@ async function presetRender(m: AvsWorkerRenderMessage) {
 const scaleSwitch = new ShowScaleSwitch(SCALE);
 
 function switchScale(scale: number) {
-  try { presetEngine?.dispose(); } catch { /* the context is going away either way */ }
+  const renderer = presetEngine?.renderer;
+  try { presetEngine?.release(); } catch { /* best effort: the targets are unreachable either way */ }
   presetEngine = null; presetReady = false; presetKey = ''; clocks.clear();
   setShowScale(scale);
-  canvas = new OffscreenCanvas(PW, PH); // a fresh canvas: the old one's context was lost with the old engine
-  presetEngine = new Engine(canvas as unknown as HTMLCanvasElement, () => presetEntries);
+  // the same canvas and WebGL context, resized: the new engine's targets, passes and plates are built at the new scale
+  presetEngine = new Engine(canvas as unknown as HTMLCanvasElement, () => presetEntries, renderer);
   scaleSwitch.settle(SCALE);
 }
 

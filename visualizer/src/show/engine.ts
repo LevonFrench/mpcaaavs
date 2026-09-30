@@ -63,6 +63,15 @@ function ternaryOffsets(steps: number) {
   return u;
 }
 
+/** Dispose every three.js GPU object reachable from `o` (render targets, materials, geometries, textures), depth-limited. */
+function releaseGpu(o: unknown, seen: Set<unknown>, depth: number) {
+  if (!o || typeof o !== 'object' || seen.has(o) || depth > 4) return;
+  seen.add(o);
+  if (o instanceof THREE.WebGLRenderTarget || o instanceof THREE.Material || o instanceof THREE.BufferGeometry || o instanceof THREE.Texture) { o.dispose(); return; }
+  if (o instanceof THREE.WebGLRenderer || ArrayBuffer.isView(o) || o instanceof ArrayBuffer) return;
+  for (const v of Array.isArray(o) ? o : o instanceof Map ? o.values() : Object.values(o as object)) releaseGpu(v, seen, depth + 1);
+}
+
 export class Engine {
   renderer: THREE.WebGLRenderer;
   ctx!: SceneCtx;
@@ -105,8 +114,10 @@ export class Engine {
 
   timeline: TimelineEntry[] = [];
 
-  constructor(public canvas: HTMLCanvasElement | OffscreenCanvas, private makeTimeline: (lyrics: Lyrics, audio: AudioData) => TimelineEntry[]) {
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false, preserveDrawingBuffer: true, powerPreference: 'high-performance' });
+  /** AAAVS: `renderer` reuses an existing WebGL context (the preset worker changing scale keeps one context for its
+   *  lifetime: a second one can stall the GPU process while the first still holds its 4K targets). */
+  constructor(public canvas: HTMLCanvasElement | OffscreenCanvas, private makeTimeline: (lyrics: Lyrics, audio: AudioData) => TimelineEntry[], renderer?: THREE.WebGLRenderer) {
+    this.renderer = renderer ?? new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false, preserveDrawingBuffer: true, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(1);
     this.renderer.setSize(PW, PH, false);
     this.renderer.autoClear = false;
@@ -237,11 +248,18 @@ export class Engine {
 
   get duration() { return this.audio.duration; }
 
-  /** AAAVS: release the scenes, the GPU copies of the analysis and the WebGL context (the preset worker switching scale). */
-  dispose() {
+  /** AAAVS: release the scenes, the GPU copies of the analysis and every render target, material, geometry and
+   *  texture this engine made, keeping the WebGL context for the next engine (the preset worker switching scale). */
+  release() {
     for (const rec of this.loaded.values()) rec.scene?.dispose();
     this.loaded.clear();
     if (this.spectrum) disposeSpectrumTextures(this.spectrum);
+    releaseGpu(this, new Set([this.renderer, this.canvas]), 0);
+  }
+
+  /** AAAVS: release() and the WebGL context. */
+  dispose() {
+    this.release();
     this.renderer.dispose();
     try { this.renderer.forceContextLoss(); } catch { /* WEBGL_lose_context is optional */ }
   }
