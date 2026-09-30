@@ -217,6 +217,35 @@ if (COMPARE) {
       writeFileSync(f, Buffer.from(jpg, 'base64'));
       console.log(`sheet ${f}`);
     }
+    // pixel metrics per still (upstream vs ours, full resolution): mean abs error (8-bit), PSNR, % pixels off by > 24 levels
+    const metrics = [];
+    for (const t of times) {
+      if (!up.has(t) || !ours.has(t)) continue;
+      const a = 'data:image/png;base64,' + readFileSync(up.get(t)).toString('base64');
+      const b = 'data:image/png;base64,' + readFileSync(ours.get(t)).toString('base64');
+      const m = await sheetPage.evaluate(async ([a, b]) => {
+        const px = async (src) => {
+          const im = new Image(); im.src = src; await im.decode();
+          const cv = new OffscreenCanvas(im.width, im.height), c = cv.getContext('2d');
+          c.drawImage(im, 0, 0);
+          return c.getImageData(0, 0, im.width, im.height).data;
+        };
+        const [A, B] = await Promise.all([px(a), px(b)]);
+        if (A.length !== B.length) return null;
+        let sum = 0, sq = 0, off = 0;
+        for (let i = 0; i < A.length; i += 4) {
+          let mx = 0;
+          for (let k = 0; k < 3; k++) { const d = Math.abs(A[i + k] - B[i + k]); sum += d; sq += d * d; if (d > mx) mx = d; }
+          if (mx > 24) off++;
+        }
+        const n = A.length / 4, mse = sq / (n * 3);
+        return { mae: sum / (n * 3), psnr: mse ? 10 * Math.log10(255 * 255 / mse) : 99, off: (100 * off) / n };
+      }, [a, b]);
+      if (!m) continue;
+      metrics.push({ plate: plateAt(t), t, ...m });
+      console.log(`diff ${plateAt(t).padEnd(10)} t=${t.toFixed(2).padStart(7)}  MAE ${m.mae.toFixed(2).padStart(5)}  PSNR ${m.psnr.toFixed(2)} dB  px>24 ${m.off.toFixed(2)}%`);
+    }
+    writeFileSync(join(SHEETS, 'metrics.json'), JSON.stringify(metrics, null, 1));
     await sheetPage.close();
   } finally {
     vite.kill();
