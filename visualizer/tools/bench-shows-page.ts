@@ -182,10 +182,11 @@ async function runSlots(o) {
     };
     schedule();
   });
+  const wall = Math.max(0.001, (now() - warmEnd) / 1000);
   const out = ws.map((w) => ({ plate: w.s.plate, kind: w.s.kind, width: w.s.width, height: w.s.height, scale: w.s.scale ?? 1, loadMs: w.loadMs, firstMs: w.first, renderer: w.renderer, replySize: w.size,
     ticks: w.ticks, missed: w.missed, requests: w.requests, bytes: w.bytes, error: w.error, lit: lit(ctx, w.s.rect), frames: w.frames }));
   for (const w of ws) w.worker.terminate();
-  return { workers: out, raf, tickMs: tickMs.slice(-Math.max(10, raf.length)), seconds, gpu: gpuInfo() };
+  return { workers: out, raf, tickMs: tickMs.slice(-Math.max(10, raf.length)), seconds: wall, gpu: gpuInfo() };
 }
 
 // ------------------------------------------------------------------ real Multiview
@@ -293,5 +294,46 @@ async function runMultiview(o) {
   return result;
 }
 
-window.bench = { runSlots, runMultiview, gpuInfo, sleep };
+/**
+ * Instrumentation identity in the NERV preset dialect: the same messages (fixed media times, the same audio frames) through a fresh worker three
+ * times with stage timing off, CPU timestamps and GPU-synchronised, and once more off (the renderer's own run-to-run noise); the last frames are
+ * compared pixel by pixel.
+ */
+async function identity(o) {
+  const { root, plate, width, height, scale = 1, frames = 10, bpm = 128 } = o;
+  const audio = makeAudio(bpm), BAR = 240 / bpm, S0 = 0.37 + 16 * BAR, S1 = S0 + 8 * BAR, grid = { offset: 0.37, beatsPerBar: 4, bpm };
+  const feed = [];
+  for (let k = 0; k < frames; k++) { const media = S0 + 3 + k / 60, a = audio.at(media); feed.push({ media, frame: a.frame, pcm: a.pcm }); }
+  const assets = new URL(`${root}/show-assets/`, location.href).href;
+  const preset = await (await fetch(`${root}/nerv-presets/${plate}.nerv`)).arrayBuffer();
+  const pixels = {};
+  for (const [label, mode] of [['off', 0], ['cpu', 1], ['sync', 2], ['off2', 0]]) {
+    const w = new Worker(`${root}/show-render.worker.js?assets=${encodeURIComponent(assets)}&scale=${scale}`, { type: 'module' });
+    const replies = []; let wake = null;
+    w.onmessage = (e) => { replies.push(e.data); wake?.(); };
+    const next = (pred) => new Promise((res) => { const f = () => { const i = replies.findIndex(pred); if (i >= 0) res(replies.splice(i, 1)[0]); else wake = f; }; f(); });
+    w.postMessage({ type: 'load', generation: 1, preset: preset.slice(0), bitmaps: [], width, height, gpuLane: 'exact' });
+    const ready = await next((d) => d.type === 'ready' || d.type === 'error');
+    if (ready.type !== 'ready') throw new Error(`${plate}: ${ready.message}`);
+    let last = null, stages = 0;
+    for (let k = 0; k < frames; k++) {
+      const m = feed[k], localTime = m.media - S0;
+      const msg = { type: 'render', generation: 1, sequence: k + 1, pcm: m.pcm.slice().buffer, audio: m.frame, width, height,
+        nerv: { time: m.media, localTime, progress: localTime / (S1 - S0), bpm, seed: 7, grid, sceneStart: S0, sceneEnd: S1 }, ...(mode ? { perf: { mode, sent: epoch() } } : {}) };
+      w.postMessage(msg, [msg.pcm]);
+      const r = await next((d) => d.type === 'frame' || d.type === 'error');
+      if (r.type === 'error') throw new Error(r.message);
+      if (r.perf) stages = Object.keys(r.perf.stages).length;
+      last?.close(); last = r.bitmap;
+    }
+    const cv = new OffscreenCanvas(last.width, last.height), g = cv.getContext('2d');
+    g.drawImage(last, 0, 0); last.close();
+    pixels[label] = { data: g.getImageData(0, 0, cv.width, cv.height).data, stages };
+    w.terminate();
+  }
+  const cmp = (a, b) => { const A = pixels[a].data, B = pixels[b].data; let max = 0, off = 0; for (let i = 0; i < A.length; i += 4) { const d = Math.max(Math.abs(A[i] - B[i]), Math.abs(A[i + 1] - B[i + 1]), Math.abs(A[i + 2] - B[i + 2])); if (d > max) max = d; if (d > 0) off++; } return { max, offPct: 100 * off / (A.length / 4) }; };
+  return { plate, size: `${width}x${height}`, noise: cmp('off', 'off2'), cpu: cmp('off', 'cpu'), sync: cmp('off', 'sync'), stages: [pixels.cpu.stages, pixels.sync.stages], plainStages: pixels.off.stages };
+}
+
+window.bench = { runSlots, runMultiview, identity, gpuInfo, sleep };
 window.benchReady = true;

@@ -86,9 +86,14 @@ function perfSet(mode: 0 | 1 | 2) {
 }
 /** The `perf` field of a render request: the mode, and the host's epoch time where the platform has one (the worker then reports the request's time in flight). */
 function perfRequest() { const sent = epochNow(); return Number.isFinite(sent) ? { mode: perf.level, sent } : { mode: perf.level }; }
+/** Trace metadata: the page and the existing FPS meter channels (present, display, render, clock) as they read now. */
+function perfMeta(page: string) {
+  const at = performance.now();
+  return { page, fps: { present: fps.present.read(at), display: fps.display.read(at), render: fps.render.read(at), clock: fps.clock.read(at) } };
+}
 function perfTraceDownload() {
   try {
-    const blob = new Blob([JSON.stringify(perf.trace(true, { page: 'mpc-host', ua: navigator.userAgent, dpr: devicePixelRatio || 1 }))], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify(perf.trace(true, { ...perfMeta('mpc-host'), ua: navigator.userAgent, dpr: devicePixelRatio || 1 }))], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob); a.download = `aaavs-perf-${Date.now()}.json`;
     document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
@@ -97,7 +102,7 @@ function perfTraceDownload() {
 {
   (window as unknown as { __aaavsPerf?: unknown }).__aaavsPerf = {
     enable: (mode: number | string = 1) => perfSet(parsePerfMode(mode) || 1), disable: () => perfSet(0), reset: () => perf.reset(),
-    trace: (withSeries = true) => perf.trace(withSeries, { page: 'mpc-host' }), download: perfTraceDownload, get mode() { return perf.level; },
+    trace: (withSeries = true) => perf.trace(withSeries, perfMeta('mpc-host')), download: perfTraceDownload, get mode() { return perf.level; },
   };
   try {
     const query = (window as { location?: { search?: string } }).location?.search;

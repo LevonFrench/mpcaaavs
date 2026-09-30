@@ -15,7 +15,7 @@
 //   --warmup N           unmeasured seconds before it (default 1.5): scene build, shader compile, first-use uploads
 //   --min-frames N       frames each slot must deliver (default 20) so a slow 4K run still has a distribution
 //   --sizes WxH,...      render sizes (default 1920x1080,3840x2160). The show engine renders 1920x1080 x scale: 4K = the worker at ?scale=2
-//   --plates a,b,...     NERV plates (default all 16: boot magi psycho radar harmonics seele battery atfield alert plug target city sync berserk impact end)
+//   --plates a,b,...     NERV plates (or none; default all 16: boot magi psycho radar harmonics seele battery atfield alert plug target city sync berserk impact end)
 //   --multiview 2,4      Multiview lane counts (default 2,4; --multiview none to skip)
 //   --multiview-modes    real (the real MultiViewSession with its Canvas2D NERV workers, what the product runs) and/or show (N concurrent show-engine
 //                        preset workers at pane size: not a product path, it measures what the show engine would cost in panes). Default real,show
@@ -24,6 +24,8 @@
 //   --avs-synth          also benchmark three synthetic heavy AVS presets built in code (SuperScope point clouds, line scopes, scopes + heavy blur): the repository has no
 //                        public AVS bank, so these are the only AVS presets it can bench without the owner's catalogue
 //   --sync               GL-synchronised stage timing (a GPU wait around GL stages): attributes GPU time to stages but distorts pipelining
+//   --identity           instead of timing: prove the instrumentation does not change a frame. Each plate's frames go through a fresh worker with stage timing off, on, synchronised
+//                        and off again (noise floor) in the NERV preset dialect, and the last frames are compared pixel by pixel. Exit status 1 on any difference above the noise
 //   --no-stages          instrumentation off in the worker (pure frame timing; use for the cleanest A/B)
 //   --pacing raf|timer   how display ticks are generated (default: raf with --gpu or --headed, a 60 Hz timer in headless software-GL runs)
 //   --complete / --no-complete  force each frame's pixels to exist before it counts (a 1-pixel readback of the presented canvas). Default on for software GL,
@@ -55,7 +57,7 @@ if (flag('help') || flag('h')) { console.log(readFileSync(fileURLToPath(import.m
 const NERV_PLATES = ['boot', 'magi', 'psycho', 'radar', 'harmonics', 'seele', 'battery', 'atfield', 'alert', 'plug', 'target', 'city', 'sync', 'berserk', 'impact', 'end'];
 const SECONDS = num('seconds', 10), WARMUP = num('warmup', 1.5), MIN_FRAMES = num('min-frames', 20), REPEAT = Math.max(1, Math.round(num('repeat', 1)));
 const SIZES = opt('sizes', '1920x1080,3840x2160').split(',').map((s) => { const m = /^(\d+)x(\d+)$/.exec(s.trim()); if (!m) throw new Error(`bad size ${s}`); return { label: `${m[1]}x${m[2]}`, width: +m[1], height: +m[2], scale: Math.min(4, Math.max(1, Math.round(+m[1] / 1920))) }; });
-const PLATES = opt('plates') ? opt('plates').split(',').map((s) => s.trim()).filter(Boolean) : NERV_PLATES;
+const PLATES = opt('plates') === 'none' ? [] : opt('plates') ? opt('plates').split(',').map((s) => s.trim()).filter(Boolean) : NERV_PLATES;
 for (const p of PLATES) if (!NERV_PLATES.includes(p)) throw new Error(`unknown plate ${p} (have ${NERV_PLATES.join(' ')})`);
 const MV_COUNTS = opt('multiview', '2,4') === 'none' ? [] : opt('multiview', '2,4').split(',').map(Number);
 const MV_MODES = opt('multiview-modes', 'real,show').split(',');
@@ -274,7 +276,7 @@ function assemble(taskRuns) {
       const per = pooled.workers.map((w) => slotResult(side, { ...task, name: `${task.name} pane ${w.plate}` }, w, pooled.raf, pooled.seconds));
       const all = pooled.workers.flatMap((w) => w.frames);
       const agg = slotResult(side, task, { ...pooled.workers[0], frames: all, ticks: pooled.workers.reduce((a, w) => a + w.ticks, 0), missed: pooled.workers.reduce((a, w) => a + w.missed, 0), requests: pooled.workers.reduce((a, w) => a + w.requests, 0), bytes: pooled.workers.reduce((a, w) => a + w.bytes, 0) }, pooled.raf, pooled.seconds);
-      produced.push({ ...agg, panes: per.map((p) => ({ plate: p.name.split(' pane ')[1], frames: p.frames, fps: p.effectiveFps, rttP50: p.total.p50, rttP95: p.total.p95, workerP50: p.worker.p50, missedPct: p.missedPct })) });
+      produced.push({ ...agg, effectiveFps: r2(per.reduce((x, p) => x + p.effectiveFps, 0)), panes: per.map((p) => ({ plate: p.name.split(' pane ')[1], frames: p.frames, fps: p.effectiveFps, rttP50: p.total.p50, rttP95: p.total.p95, workerP50: p.worker.p50, missedPct: p.missedPct })) });
     } else produced.push(slotResult(side, task, pooled.workers[0], pooled.raf, pooled.seconds));
   }
   return produced;
@@ -337,6 +339,23 @@ async function synthAvs() {
   write('synth-lines-4x4k', [0, 1, 2, 3].map((k) => [36, lines(k)]));
   write('synth-dots-blur-heavy', [[36, dots], [6, blur(3)], [36, lines(2)], [6, blur(3)], [6, blur(3)]]);
   return out;
+}
+
+// ------------------------------------------------------------------ instrumentation identity (--identity)
+if (flag('identity')) {
+  const rows = [];
+  try {
+    for (const plate of PLATES) {
+      const size = SIZES[0];
+      const r = await pages.get('cand').evaluate((o) => window.bench.identity(o), { root: '/cand', plate, width: size.width, height: size.height, scale: size.scale });
+      rows.push(r);
+      log(`identity ${plate.padEnd(10)} ${r.size}  plain rerender: max ${r.noise.max} (${r.noise.offPct.toFixed(3)}% px)  stage timing on: max ${r.cpu.max} (${r.cpu.offPct.toFixed(3)}% px, ${r.stages[0]} stages)  synchronised: max ${r.sync.max} (${r.sync.offPct.toFixed(3)}% px, ${r.stages[1]} stages)  stages when off: ${r.plainStages}`);
+    }
+  } finally { await browser.close(); server.close(); }
+  const worst = Math.max(...rows.map((r) => Math.max(r.cpu.max, r.sync.max))), floor = Math.max(...rows.map((r) => r.noise.max));
+  log(`identity: ${rows.length} plates, worst difference with instrumentation on = ${worst} levels, plain-rerender noise floor = ${floor} levels, frames with instrumentation off carried ${rows.reduce((a, r) => a + r.plainStages, 0)} stages`);
+  if (OUT) writeFileSync(OUT, JSON.stringify({ format: 'aaavs-bench-identity', version: 1, created: new Date().toISOString(), rows }, null, 1) + '\n');
+  process.exit(worst > floor || rows.some((r) => r.plainStages !== 0 || r.stages[0] === 0 || r.stages[1] === 0) ? 1 : 0);
 }
 
 // ------------------------------------------------------------------ run

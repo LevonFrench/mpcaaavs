@@ -97,6 +97,7 @@ const report = () => ({ stages: { 'frame.total': 9, 'scene.render': 6 }, counts:
   ok(t.stages['host.rtt'].n >= 1 && t.stages['frame.total'].p50 === 9 && t.stages['scene.render'].p50 === 6 && t.stages['host.reply'].n >= 1, 'the worker report and the round trip are recorded');
   ok(t.counters['host.render.messages'].total >= 1 && t.counters['host.render.bytes'].total >= 4608 && t.counters['host.audio.messages'].total >= 1 && t.counters['host.audio.floats'].total >= 1152 && t.counters['host.frame.messages'].total >= 1, 'message counters');
   ok(t.stages['host.raf.interval'].n >= 2 && t.stages['host.raf.busy'].n >= 2, 'rAF cadence and callback time are recorded');
+  ok(t.meta && t.meta.page === 'mpc-host' && ['present', 'display', 'render', 'clock'].every((k) => k in t.meta.fps), 'the trace carries the existing FPS meter channels');
   ok(t.stages['host.audio.msg'].n >= 1, 'native audio message handling time is recorded');
   ok(s.classes.has('timing-always') && (s.nodes.get('#timing').textContent ?? '').includes('perf'), 'the timing line shows the perf segment');
   // a malformed report is dropped, not thrown
