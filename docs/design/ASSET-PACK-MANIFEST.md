@@ -119,6 +119,25 @@ exactly one frame source:
 
 Loops wrap; one-shots hold their last frame. Stand-in and real art share the same timeline: plates pass `time` in source frames.
 
+### Sprite-layer additions (optional, still `version` 1)
+
+The sprite layer (`docs/design/SPRITE-SHOW-KIT.md`, `visualizer/src/show/sprite/`) needs four things a plain strip does not say. They are
+optional fields of the same `version: 1`; a pack without them validates and normalizes exactly as before (the keys do not appear in the
+normalized manifest). Older builds reject packs that use them (unknown key), which is the intended signal. All rules below are checked by
+`tools/check-sprite-layer.mjs` (good and bad cases).
+
+| Field | Where | Meaning |
+| --- | --- | --- |
+| `indexed` | atlas | `true`: the PNG stores **palette indices in its red channel** (grayscale or RGBA; alpha = coverage) and the region, clip or plate names the palette that colours it. A different palette recolours the same art (palette swap); palette `cycles` rotate on the beat. Load such PNGs with `premultiplyAlpha: 'none'` and no colour conversion (the default loader does). |
+| `trims` | clip | one `[x, y]` per frame: where the frame's atlas rectangle sits inside the **untrimmed** source frame (packers trim transparent borders). |
+| `anchors` | clip | (existing) with `trims` present they are measured in the untrimmed frame, so the foot anchor may lie outside the trimmed rectangle; the anchor inside the rectangle is `anchor - trim`. Without `trims` the rule is unchanged (inside the frame). |
+| `parts` | clip | up to 8 detached parts by id (a weapon, a cape, a held prop): `{ atlas, rects: [rect or null per frame], offsets: [[x, y] per frame], layer: "front"\|"back", palette? }`. `offsets[i]` is the part rectangle's top-left relative to the body frame's anchor, unflipped, in pixels (may be negative). |
+
+The per-frame atlas rectangle, the foot anchor, `hold` (**ticks of the game's 60 Hz clock**, what the field calls source frames), `big` (frame
+indices where the release, impact or flash lands) and the detached parts are therefore all in the manifest. `AssetPack.clipFrames(id)` resolves
+them per frame as `{ atlas, rect, anchor, hold, trim, parts }`. Indexed atlases carry `AtlasDef.indexed`; `PaletteTable`
+(`src/show/sprite/palettes.ts`) builds the palette texture from `manifest.palettes`.
+
 ### Fonts (glyph grids)
 
 `atlas`, `rect`, `cell` `[w, h]`, `columns`, `chars` (glyphs in grid order, left to right then down; no repeats, no control

@@ -14,7 +14,13 @@ import { FONT_CHARS, glyphRows } from './font5x7.ts';
 export const TEST_PACK_ID = 'test-pack';
 /** An atlas image with its pixels: what the sprite layer uploads. Indexed atlases carry the palette index in the red channel. */
 export interface RawAtlas extends AtlasImage { readonly data: Uint8Array; readonly indexed: boolean }
-export interface TestPack { readonly pack: AssetPack; readonly manifest: AssetPackManifest; readonly atlases: ReadonlyMap<string, RawAtlas> }
+export interface TestPack {
+  readonly pack: AssetPack;
+  readonly manifest: AssetPackManifest;
+  readonly atlases: ReadonlyMap<string, RawAtlas>;
+  /** The manifest as authored (plain JSON, before validation and normalization): what a pipeline would write to pack.json. */
+  readonly draft: unknown;
+}
 
 // ------------------------------------------------------------------------------------------------ pixel canvas and atlas packer
 type Rect4 = [number, number, number, number];
@@ -334,7 +340,7 @@ export function buildTestPack(): TestPack {
       const frames: string[] = [], anchors: number[][] = [], trims: number[][] = [];
       const parts: { rects: (number[] | null)[]; offsets: number[][] } = { rects: [], offsets: [] };
       let anyPart = false;
-      const anchor: V2 = [16 * s, 39 * s];
+      const anchor: V2 = [16 * s, 40 * s - 1];
       spec.poses.forEach((pose, i) => {
         const d = drawFigure(pose, s, horns), box = d.body.bbox() ?? [0, 0, 1, 1];
         const rect = actors.place(d.body, box);
@@ -426,6 +432,9 @@ export function buildTestPack(): TestPack {
   regions['bar-frame'] = { role: 'hud', atlas: 'ui', rect: barRect, part: 'bar', fill: 'left-to-right', segmentPitch: 4, ghost: '#ffffff', nineSlice: { left: 3, top: 3, right: 3, bottom: 3 } };
   regions.banner = { role: 'hud', atlas: 'ui', rect: bannerRect, part: 'banner', nineSlice: { left: 6, top: 6, right: 6, bottom: 6 } };
   regions.select = { role: 'screen', atlas: 'ui', rect: selRect, nineSlice: { left: 4, top: 4, right: 4, bottom: 4 }, slots: { a: [4, 4, 26, 40], b: [34, 4, 26, 40] }, cursors: [[4, 4], [34, 4]] };
+  const dialogRect = ui.place(drawPanel(24, 16, '#ffffff', '#101830e8', '#6a7ab0')), wipeRect = ui.place(drawPanel(16, 16, '#ffffff', '#000000ff', '#000000'));
+  regions.dialog = { role: 'text', atlas: 'ui', rect: dialogRect, nineSlice: { left: 4, top: 4, right: 4, bottom: 4 } };
+  regions.wipe = { role: 'transition', atlas: 'ui', rect: wipeRect, beats: 2, direction: 'left' };
   // cursor: 2-frame arrow
   const cursorFrames = [0, 1].map((f) => { const c = new Canvas(9, 9, false); for (let i = 0; i < 6; i++) c.rect(i + f, i, 1, 1, rgba('#ffffff')); c.rect(f, 0, 6, 1, rgba('#ffffff')); c.rect(f, 0, 1, 6, rgba('#ffffff')); return ui.place(c, c.bbox()!); });
   cursorFrames.forEach((r, i) => { regions[`cursor-${i}`] = { role: 'clip', atlas: 'ui', rect: r }; });
@@ -454,7 +463,8 @@ export function buildTestPack(): TestPack {
   const atlases = new Map<string, RawAtlas>([['actors', actors.finish()], ['fx', fx.finish()], ['stage', stage.finish()], ['ui', ui.finish()]]);
   for (const [id, a] of atlases) manifestDraft.atlases[id]!.height = a.height;
   // the palette cycles are only meaningful for the stage palettes; the cycling ranges must exist in every palette that has them
-  const checked = checkAssetPackManifest(JSON.parse(JSON.stringify(manifestDraft)));
+  const draft = JSON.parse(JSON.stringify(manifestDraft));
+  const checked = checkAssetPackManifest(draft);
   if (!checked.manifest) throw new Error(`test pack manifest is invalid: ${JSON.stringify(checked.issues.slice(0, 5))}`);
-  return { pack: new AssetPack(checked.manifest, atlases), manifest: checked.manifest, atlases };
+  return { pack: new AssetPack(checked.manifest, atlases), manifest: checked.manifest, atlases, draft: JSON.parse(JSON.stringify(manifestDraft)) };
 }

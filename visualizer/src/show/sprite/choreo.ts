@@ -59,8 +59,11 @@ export interface LaneSpec {
   readonly minStrength?: number;
   readonly maxPerBar?: number;
   readonly minGap?: number;
-  /** downbeat lanes: one event every N bars (default 1). */
+  /** downbeat lanes: one event every N bars (default 1), starting at bar `offset` (mod N). */
   readonly every?: number;
+  readonly offset?: number;
+  /** Take every n-th event (after thinning), starting with r: [n, r] spreads one drum line over several performers. */
+  readonly pick?: readonly [number, number];
   readonly hitstop?: boolean;
   readonly target?: string;
   /** The target's reaction clip (default 'hurt'; 'none' for no reaction). */
@@ -89,6 +92,8 @@ export interface PerformerSpec {
   /** The loop's phase offset in beats. */
   readonly beatOffset?: number;
   readonly lanes: readonly LaneSpec[];
+  /** Position over the plate window (u = 0..1) instead of the fixed x, y (a boss approaching across a build). */
+  readonly path?: (u: number) => readonly [number, number];
 }
 export interface StagePlan {
   readonly performers: readonly PerformerSpec[];
@@ -194,6 +199,7 @@ export function choreograph(au: ChoreoAudio, pack: ChoreoPack, plan: StagePlan, 
   const phrase = Math.max(1, plan.phraseBars ?? 2);
   const bar0 = Math.floor(au.songBarAt(t0) + 1e-3);
   const byId = new Map(plan.performers.map((p) => [p.id, p] as const));
+  const pos = (p: PerformerSpec, t: number): [number, number] => { if (!p.path) return [p.x, p.y]; const [a, b] = p.path(Math.min(1, Math.max(0, (t - t0) / Math.max(1e-6, t1 - t0)))); return [a, b]; };
   const dirOf = (p: PerformerSpec) => (p.facing === 'right' ? 1 : -1);
   const activeSide = (t: number): 'A' | 'B' => (Math.floor((Math.floor(au.songBarAt(t) + 1e-6) - bar0) / phrase) % 2 === 0 ? 'A' : 'B');
   const turnOk = (p: PerformerSpec, lane: LaneSpec, t: number) => !lane.turn || !p.side || (lane.turn === 'call') === (p.side === activeSide(t));
@@ -224,8 +230,8 @@ export function choreograph(au: ChoreoAudio, pack: ChoreoPack, plan: StagePlan, 
     let evs: Ev[] = [];
     if (lane.source === 'kick' || lane.source === 'snare' || lane.source === 'hat' || lane.source === 'vocal') evs = eventsOf(au, lane.source, t0, t1, synthesized);
     else if (lane.source === 'downbeat') {
-      const every = Math.max(1, lane.every ?? 1);
-      evs = db.map((t, i) => ({ t, s: i % every === 0 ? 0.7 : -1 })).filter((e) => e.s > 0 && e.t >= t0 && e.t < t1 && Math.round(au.songBarAt(e.t)) % every === 0);
+      const every = Math.max(1, lane.every ?? 1), off = lane.offset ?? 0;
+      evs = db.map((t) => ({ t, s: 0.7 })).filter((e) => e.t >= t0 && e.t < t1 && ((Math.round(au.songBarAt(e.t)) - off) % every + every) % every === 0);
     } else {
       // the drop moment: one bar after each drop downbeat in the window (so the windup shows), or two beats after when the window is short
       for (const s of au.sections) if (s.role === 'drop' && s.start >= t0 - 0.05 && s.start < t1) {
@@ -234,7 +240,8 @@ export function choreograph(au: ChoreoAudio, pack: ChoreoPack, plan: StagePlan, 
         if (te < t1) evs.push({ t: te, s: 1 });
       }
     }
-    for (const e of thin(au, evs, lane)) if (turnOk(p, lane, e.t)) cands.push({ t: e.t, s: e.s, p, lane, li, order: order++ });
+    const thinned = thin(au, evs, lane), [pn, pr] = lane.pick ?? [1, 0];
+    for (const e of thinned.filter((_, i) => i % pn === pr)) if (turnOk(p, lane, e.t)) cands.push({ t: e.t, s: e.s, p, lane, li, order: order++ });
   });
   cands.sort((a, b) => a.t - b.t || a.order - b.order);
 
@@ -294,10 +301,10 @@ export function choreograph(au: ChoreoAudio, pack: ChoreoPack, plan: StagePlan, 
     if (!a) continue;
     const target = lane.target ? byId.get(lane.target) : undefined;
     const hs = a.hitstops.reduce((m, h) => m + h.ticks, 0);
-    if (a.verb === 'die') { script.fx.push({ region: lane.fx ?? 'burst', x: p.x, y: p.y - 14, t: a.bigTime }); spawnAfter(p, a); }
+    if (a.verb === 'die') { const [dx, dy] = pos(p, a.bigTime); script.fx.push({ region: lane.fx ?? 'burst', x: dx, y: dy - 14, t: a.bigTime }); spawnAfter(p, a); }
     // the impact of a melee action (or any action without a launch): spark at the reach point, reaction of the target, a punch
     if (!lane.launch && lane.fx && a.verb !== 'die') {
-      const ix = p.x + face(p) * (lane.reach ?? 16), iy = p.y - 16;
+      const [ox, oy] = pos(p, a.event), ix = ox + face(p) * (lane.reach ?? 16), iy = oy - 16;
       script.fx.push({ region: lane.fx, x: ix, y: iy, t: a.event, flip: p.facing === 'left' });
       if (target && lane.reaction !== 'none') react(target, lane.reaction ?? 'hurt', a.event, cnd.s, hs);
       if (hs) { script.punches.push({ t: a.event, kind: 'hit', shake: 1 + Math.round(cnd.s * 2), zoom: 1 + 0.004 * hs, flash: 0, ticks: hs }); script.freezes.push({ t: a.event, ticks: hs, who: [p.id, ...(target ? [target.id] : [])] }); }
@@ -305,9 +312,9 @@ export function choreograph(au: ChoreoAudio, pack: ChoreoPack, plan: StagePlan, 
     if (lane.launch) {
       const L = lane.launch, rg = pack.regionOf(L.region, 'projectile');
       const beat0 = au.beatAt(a.event), beat1 = landingBeat(beat0, L.beats);
-      const t = target ?? p;
-      const origin: [number, number] = L.origin === 'sky' ? [t.x + (hash32(seed, a.id) % 40) - 20, -20] : [p.x + face(p) * (rg?.spawn[0] ?? 10), p.y - (rg?.spawn[1] ?? 14)];
-      const dest: [number, number] = L.origin === 'floor' ? [t.x, t.y] : [t.x - face(p) * 4, t.y - 14];
+      const tp = target ?? p, [ox, oy] = pos(p, a.event), [tx, ty] = pos(tp, au.timeOfBeat(beat1));
+      const origin: [number, number] = L.origin === 'sky' ? [tx + (hash32(seed, a.id) % 40) - 20, -20] : [ox + face(p) * (rg?.spawn[0] ?? 10), oy - (rg?.spawn[1] ?? 14)];
+      const dest: [number, number] = L.origin === 'floor' ? [tx, ty] : [tx - face(p) * 4, ty - 14];
       const count = L.model === 'spread' ? Math.max(1, L.count ?? 5) : 1;
       const flight = beat1 - beat0;
       for (let i = 0; i < count; i++) {
@@ -327,8 +334,9 @@ export function choreograph(au: ChoreoAudio, pack: ChoreoPack, plan: StagePlan, 
     if (lane.screenwide) {
       const ticks = 12;
       script.freezes.push({ t: a.bigTime, ticks, who: '*' });
-      script.fx.push({ region: 'flash', x: p.x + face(p) * 12, y: p.y - 18, t: a.bigTime, scale: 3 });
-      script.fx.push({ region: 'ring', x: p.x, y: p.y - 14, t: a.bigTime, scale: 2 });
+      const [sx, sy] = pos(p, a.bigTime);
+      script.fx.push({ region: 'flash', x: sx + face(p) * 12, y: sy - 18, t: a.bigTime, scale: 3 });
+      script.fx.push({ region: 'ring', x: sx, y: sy - 14, t: a.bigTime, scale: 2 });
       script.punches.push({ t: a.bigTime, kind: 'super', shake: 6, zoom: 1.08, flash: 0.55, ticks });
     }
   }

@@ -14,7 +14,7 @@ import { SOLID_ATLAS } from './hud.ts';
 
 const VERT = /* glsl */ `
 precision highp float;
-in vec2 position;
+in vec3 position;
 in vec4 iRect;   // atlas x, y, w, h
 in vec4 iPlace;  // native x, y, w, h (top-left origin)
 in vec4 iFlags;  // flipX, palette row (-1: none), clipY, unused
@@ -27,8 +27,8 @@ flat out vec4 vPlace;
 flat out vec4 vFlags;
 flat out vec4 vTint;
 void main() {
-  vec2 px = iPlace.xy + position * iPlace.zw;
-  vLocal = position * iPlace.zw;
+  vec2 px = iPlace.xy + position.xy * iPlace.zw;
+  vLocal = position.xy * iPlace.zw;
   vY = px.y;
   vRect = iRect; vPlace = iPlace; vFlags = iFlags; vTint = iTint;
   gl_Position = vec4(px.x / nativeSize.x * 2.0 - 1.0, 1.0 - px.y / nativeSize.y * 2.0, 0.0, 1.0);
@@ -65,7 +65,7 @@ void main() {
   fragColor = vec4(col.rgb * col.a, col.a);
 }`;
 
-const QUAD = [0, 0, 1, 0, 0, 1, 1, 1];
+const QUAD = [0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0];
 const CAP = 4096;
 
 interface Group { mesh: THREE.Mesh; geo: THREE.InstancedBufferGeometry; mat: THREE.RawShaderMaterial; rect: Float32Array; place: Float32Array; flags: Float32Array; tint: Float32Array }
@@ -123,12 +123,12 @@ export class SpriteLayer {
     let g = this.pool[i];
     if (!g) {
       const geo = new THREE.InstancedBufferGeometry();
-      geo.setAttribute('position', new THREE.Float32BufferAttribute(QUAD, 2));
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(QUAD, 3));
       geo.setIndex([0, 1, 2, 2, 1, 3]);
       const mk = (n: string) => { const a = new Float32Array(CAP * 4); geo.setAttribute(n, new THREE.InstancedBufferAttribute(a, 4).setUsage(THREE.DynamicDrawUsage)); return a; };
       const rect = mk('iRect'), place = mk('iPlace'), flags = mk('iFlags'), tint = mk('iTint');
       const mat = new THREE.RawShaderMaterial({
-        glslVersion: THREE.GLSL3, vertexShader: VERT, fragmentShader: FRAG, depthTest: false, depthWrite: false, transparent: true, blending: THREE.CustomBlending,
+        glslVersion: THREE.GLSL3, vertexShader: VERT, fragmentShader: FRAG, depthTest: false, depthWrite: false, transparent: true, blending: THREE.CustomBlending, side: THREE.DoubleSide,
         uniforms: { atlas: { value: null }, palTex: { value: this.palTex }, indexed: { value: false }, nativeSize: { value: new THREE.Vector2(this.nativeW, this.nativeH) } },
       });
       const mesh = new THREE.Mesh(geo, mat);

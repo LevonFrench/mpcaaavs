@@ -23,6 +23,8 @@ import { parseNervPreset } from './nerv-preset.ts';
 import { createNervLegacyRenderer, drawNervTransition, validateNervClock, NERV_SILENCE, type NervTransitionCache } from './nerv-legacy-render.ts';
 import { HARD_MAX_EDGE, HARD_MAX_PIXELS, fitWithin } from './render-resolution.ts';
 import { NERV_SCENE_CLASSES, NERV_SHOW, type NervPlateId } from './shows/nerv/index.ts';
+import { SHOW_DEFS, isShowId, type ShowId } from './shows/defs.ts';
+import { SHOW_SCENES } from './shows/scenes.ts';
 import { validateSongMap } from './song-map/validate.ts';
 import { synthesizeWave } from './song-map/synth-wave.ts';
 
@@ -41,10 +43,10 @@ let live: LiveAudioData | null = null;
 const debug = (s: string) => { if (verbose) console.info('[show worker]', s); };
 
 /** Timeline entries for planned plates (one scene instance per window). */
-export function entriesFor(plan: readonly PlannedPlate[]): TimelineEntry[] {
+export function entriesFor(plan: readonly PlannedPlate[], show: ShowId = 'nerv'): TimelineEntry[] {
   return plan.map((p) => {
-    const cls = NERV_SCENE_CLASSES[p.id as NervPlateId];
-    if (!cls) throw new Error(`unknown NERV plate ${p.id}`);
+    const cls = SHOW_SCENES[show][p.id];
+    if (!cls) throw new Error(`unknown ${show} plate ${p.id}`);
     return { id: p.id, key: `${p.id}@${p.start.toFixed(4)}-${p.end.toFixed(4)}`, load: () => ({ default: cls }), start: p.start, end: p.end, barMap: p.barMap, params: p.params };
   });
 }
@@ -71,10 +73,13 @@ async function init(m: ShowInitMessage) {
   }
   const map = audio.map;
   debug(`analysis ready ${(performance.now() - t0).toFixed(0)} ms`);
-  let plan = planShow(map, NERV_SHOW, { ...(m.params ?? {}) });
-  const full = plan;
+  const showId: ShowId = isShowId(m.show) ? m.show : 'nerv';
+  const full = planShow(map, SHOW_DEFS[showId], { ...(m.params ?? {}) });
+  // other shows than NERV number their plates in the header (the index in the whole plan, not in the filtered one)
+  if (showId !== 'nerv') full.forEach((p, i) => { p.params = { ...p.params, plateNo: i + 1 }; });
+  let plan = full;
   if (m.only?.length) plan = plan.filter((p) => m.only!.includes(p.id));
-  entries = entriesFor(plan);
+  entries = entriesFor(plan, showId);
   if (!engine) {
     engine = new Engine(canvas as unknown as HTMLCanvasElement, () => entries);
     engine.onProgress = (msg) => debug(`${msg} ${(performance.now() - t0).toFixed(0)} ms`);

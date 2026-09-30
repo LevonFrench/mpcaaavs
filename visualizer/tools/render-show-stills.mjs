@@ -8,10 +8,14 @@
 //   node tools/render-show-stills.mjs --plates [--per 3] [--only ...]          times inside every plate window
 //   node tools/render-show-stills.mjs --plates --compare <evangelion checkout>  + upstream + contact sheets
 //   --sheet-dir <dir>  where contact sheets go (default <out>/sheets); --jpg-quality 0.82; --cell 640
+//   --show <id>        which show to plan and render: nerv (default) or pixel-stage (the sprite-layer demo, src/shows/pixel-stage); the song map
+//                      is always the NERV reference fixture
 //   --timing           report render cost per plate (GPU-synchronised, software rendering: relative only)
 //   --determinism      seek-replay proof: each time is rendered cold, then after rendering other times (a seek away and
 //                      back), and the two frames are compared pixel by pixel (reported per time; SwiftShader's own
 //                      run-to-run noise is measured by rendering the same time twice in a row)
+//   --show <id>        which show to plan and render: nerv (default) or pixel-stage (the sprite-layer demo, src/shows/pixel-stage); the
+//                      song map is always the NERV reference fixture (a synthetic song would also do)
 //   --live             no song map: the live fallback (tempo grid from the fixture's tempo and first beat) fed with AVS
 //                      frames made from the synthesized waveform at 60 fps up to each still time (use with --t)
 import { build } from 'esbuild';
@@ -33,6 +37,7 @@ const SHEETS = resolve(opt('sheet-dir', join(OUT, 'sheets')));
 const ONLY = opt('only') ? opt('only').split(',') : null;
 const COMPARE = opt('compare') ? resolve(opt('compare')) : null;
 const PER = +opt('per', '3');
+const SHOW = opt('show', 'nerv');
 const CELL = +opt('cell', '640');
 const QUALITY = +opt('jpg-quality', '0.82');
 const PARAMS = { title: 'NEON OVERDRIVE', artist: 'mroneilovealot', titleJp: 'ネオン・オーバードライブ', unit: opt('unit', ''), unitJp: opt('unit-jp', '') };
@@ -67,8 +72,8 @@ window.__show = {
       const { synthesizeWave, AvsAudioAnalyser } = await import('/.tmp/show-stills/live-feed.js');
       const w = synthesizeWave(songMap, { spec: new Uint8Array(spec) });
       feed = { wave: w.wave, rate: w.rate, an: new AvsAudioAnalyser(), next: 1 };
-      worker.postMessage({ type: 'show-init', generation: gen, assetBase: '/show-assets/', songMap: null, duration: songMap.duration, bpm: songMap.bpm, firstBeat: songMap.beats[0], params: o.params, verbose: !!o.verbose });
-    } else worker.postMessage({ type: 'show-init', generation: gen, assetBase: '/show-assets/', songMap, spec, params: o.params, only: o.only ?? undefined, verbose: !!o.verbose }, [spec]);
+      worker.postMessage({ type: 'show-init', generation: gen, assetBase: '/show-assets/', songMap: null, duration: songMap.duration, bpm: songMap.bpm, firstBeat: songMap.beats[0], params: o.params, show: o.show, verbose: !!o.verbose });
+    } else worker.postMessage({ type: 'show-init', generation: gen, assetBase: '/show-assets/', songMap, spec, params: o.params, show: o.show, only: o.only ?? undefined, verbose: !!o.verbose }, [spec]);
     return r;
   },
   // live: AVS frames at 60 fps from the last fed frame up to song time t (44.1 kHz PCM upsampled from the synthesized wave)
@@ -148,9 +153,10 @@ async function newPage(browser, logs) {
 
 // ------------------------------------------------------------------ plan + times
 const fixture = JSON.parse(readFileSync(join(VIS, 'tools/fixtures/nerv-reference/song-map.json'), 'utf8'));
-const planMod = await build({ stdin: { contents: `export { planShow } from './src/show/plan.ts'; export { NERV_SHOW } from './src/shows/nerv/show-def.ts';`, resolveDir: VIS, loader: 'ts' }, bundle: true, format: 'esm', write: false });
-const { planShow, NERV_SHOW } = await import(`data:text/javascript;base64,${Buffer.from(planMod.outputFiles[0].text).toString('base64')}`);
-const plan = planShow(fixture, NERV_SHOW, PARAMS);
+const planMod = await build({ stdin: { contents: `export { planShow } from './src/show/plan.ts'; export { SHOW_DEFS } from './src/shows/defs.ts';`, resolveDir: VIS, loader: 'ts' }, bundle: true, format: 'esm', write: false });
+const { planShow, SHOW_DEFS } = await import(`data:text/javascript;base64,${Buffer.from(planMod.outputFiles[0].text).toString('base64')}`);
+if (!SHOW_DEFS[SHOW]) throw new Error(`unknown show ${SHOW}; known: ${Object.keys(SHOW_DEFS).join(', ')}`);
+const plan = planShow(fixture, SHOW_DEFS[SHOW], PARAMS);
 
 let times = [];
 if (opt('t')) times = opt('t').split(',').map(Number);
@@ -176,7 +182,7 @@ try {
   await page.waitForFunction(() => window.__ready);
   const LIVE = flag('live');
   const only = LIVE ? null : ONLY ?? [...new Set(times.map(plateAt))];
-  const ready = await page.evaluate(([params, only, scale, verbose, live]) => window.__show.init({ params, only, scale, verbose, live }), [PARAMS, only, SCALE, flag('verbose'), LIVE]);
+  const ready = await page.evaluate(([params, only, scale, verbose, live, show]) => window.__show.init({ params, only, scale, verbose, live, show }), [PARAMS, only, SCALE, flag('verbose'), LIVE, SHOW]);
   if (LIVE) console.log(`live plan: ${ready.plan.map((p) => `${p.id}[${p.start.toFixed(1)}-${p.end.toFixed(1)}]`).join(' ')}`);
   if (LIVE) times.sort((a, b) => a - b);
   console.log(`ours: ${ready.width}x${ready.height}, init ${ready.initMs.toFixed(0)} ms, synthesized wave ${ready.synthesizedWave}`);

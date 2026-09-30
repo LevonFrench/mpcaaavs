@@ -119,7 +119,8 @@ export class Stage {
       if (!region || !f) continue;
       const s = p.scale ?? 1;
       let px = p.x, py = p.y;
-      if (p.hover) { const m = motionAt({ model: 'hover', from: [p.x, p.y], to: [p.x, p.y], beat0: 0, beat1: 1, amp: p.hover }, clock); px = m.x; py = m.y; }
+      if (p.path) { const u = Math.min(1, Math.max(0, (t - this.script.window[0]) / Math.max(1e-6, this.script.window[1] - this.script.window[0]))); [px, py] = p.path(u); }
+      if (p.hover) { const m = motionAt({ model: 'hover', from: [px, py], to: [px, py], beat0: 0, beat1: 1, amp: p.hover }, clock); px = m.x; py = m.y; }
       if (pose.action && (pose.action.verb === 'hurt' || pose.action.verb === 'guard')) {
         const ticks = (t - pose.action.bigTime) * TICK_RATE;
         px -= (p.facing === 'right' ? 1 : -1) * Math.max(0, 3 - Math.max(0, ticks) * 0.4);

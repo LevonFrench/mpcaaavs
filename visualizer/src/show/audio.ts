@@ -6,7 +6,7 @@
 // upstream's, method for method, so the plates call it unchanged and never know which analyzer (or the
 // live fallback, see live.ts) produced the data. `withBarMap()` gives a plate a view whose bar grid is
 // re-indexed onto its home bars (see bar-map.ts); everything else is shared.
-import type { SongMapBinary, SongMapJSON, SongMapSection } from '../song-map/types.ts';
+import type { SectionRole, SongMapBinary, SongMapJSON, SongMapSection } from '../song-map/types.ts';
 import { type BarMap, isIdentity, mapBarToTime, mapTimeToBar } from './bar-map.ts';
 
 /** Upstream's analysis JSON (data/audio.json); kept for the fixture converter and the reference harness. */
@@ -180,7 +180,7 @@ export class AudioData {
   }
 
   /** The section at t with its local progress 0..1 and index. */
-  sectionAt(t: number): { name: string; start: number; end: number; p: number; i: number } {
+  sectionAt(t: number): { name: string; role: SectionRole; start: number; end: number; p: number; i: number } {
     let i = this.sections.findIndex((s) => t >= s.start && t < s.end);
     if (i < 0) i = t < (this.sections[0]?.start ?? 0) ? 0 : this.sections.length - 1;
     const s = this.sections[i] ?? { name: 'song', role: 'groove', start: 0, end: this.duration, energy: 0.5 };
