@@ -25,13 +25,18 @@ export interface RegionPlan {
   readonly feedEnd: number;
 }
 
-/** Five-minute cores with REGION_CONTEXT_SECONDS of context each side. Files up to one core are one region. */
-export function planRegions(totalSamples: number, sampleRate: number, coreSeconds = REGION_CORE_SECONDS): RegionPlan[] {
-  const core = Math.max(1, Math.round(coreSeconds * sampleRate)), context = Math.round(REGION_CONTEXT_SECONDS * sampleRate);
+/**
+ * Five-minute cores with REGION_CONTEXT_SECONDS of context each side. Files up to one core are one region.
+ * `firstCoreSeconds` shortens only the first core so the first useful result arrives early.
+ */
+export function planRegions(totalSamples: number, sampleRate: number, coreSeconds = REGION_CORE_SECONDS, firstCoreSeconds = coreSeconds): RegionPlan[] {
+  const core = Math.max(1, Math.round(coreSeconds * sampleRate)), first = Math.max(1, Math.round(firstCoreSeconds * sampleRate));
+  const context = Math.round(REGION_CONTEXT_SECONDS * sampleRate);
   const plans: RegionPlan[] = [];
-  for (let start = 0, index = 0; start < totalSamples; start += core, index++) {
-    const end = Math.min(totalSamples, start + core);
+  for (let start = 0, index = 0; start < totalSamples; index++) {
+    const end = Math.min(totalSamples, start + (index === 0 ? first : core));
     plans.push({ index, coreStart: start, coreEnd: end, feedStart: Math.max(0, start - context), feedEnd: Math.min(totalSamples, end + context) });
+    start = end;
   }
   return plans;
 }
