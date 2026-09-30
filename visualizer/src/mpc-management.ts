@@ -390,6 +390,9 @@ export class PresetManagement {
     if (this.open) { this.syncTop(); this.view?.refresh(); this.drawItem(); }
   }
 
+  /** The setups last loaded or acknowledged as saved (a save, edit or delete); null until the file has loaded. Never a pending draft. */
+  acknowledgedSetups(): readonly PresetSetup[] | null { return this.loaded ? this.sets : null; }
+
   /** Stops listening and cancels timers. The panel is left as it is. */
   dispose(): void {
     if (this.lastTimer !== null) this.timers.clear(this.lastTimer);
