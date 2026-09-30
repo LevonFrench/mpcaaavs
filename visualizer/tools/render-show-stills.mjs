@@ -9,6 +9,9 @@
 //   node tools/render-show-stills.mjs --plates --compare <evangelion checkout>  + upstream + contact sheets
 //   --sheet-dir <dir>  where contact sheets go (default <out>/sheets); --jpg-quality 0.82; --cell 640
 //   --timing           report render cost per plate (GPU-synchronised, software rendering: relative only)
+//   --determinism      seek-replay proof: each time is rendered cold, then after rendering other times (a seek away and
+//                      back), and the two frames are compared pixel by pixel (reported per time; SwiftShader's own
+//                      run-to-run noise is measured by rendering the same time twice in a row)
 //   --live             no song map: the live fallback (tempo grid from the fixture's tempo and first beat) fed with AVS
 //                      frames made from the synthesized waveform at 60 fps up to each still time (use with --t)
 import { build } from 'esbuild';
@@ -86,6 +89,21 @@ window.__show = {
     }
     feed.next = k;
     return n;
+  },
+  // pixels of a render kept in the page, for the determinism comparison
+  async grab(t, key) {
+    const s = ++seq;
+    const f = await new Promise((res, rej) => { pending.set(s, { res, rej }); worker.postMessage({ type: 'show-render', generation: gen, sequence: s, time: t, sync: true }); });
+    const cv = new OffscreenCanvas(f.width, f.height), g = cv.getContext('2d');
+    g.drawImage(f.bitmap, 0, 0); f.bitmap.close();
+    (window.__grabs ??= {})[key] = g.getImageData(0, 0, f.width, f.height).data;
+    return f.plate;
+  },
+  compare(a, b) {
+    const A = window.__grabs[a], B = window.__grabs[b];
+    let max = 0, off = 0;
+    for (let i = 0; i < A.length; i += 4) { const d = Math.max(Math.abs(A[i] - B[i]), Math.abs(A[i + 1] - B[i + 1]), Math.abs(A[i + 2] - B[i + 2])); if (d > max) max = d; if (d > 0) off++; }
+    return { max, off: (100 * off) / (A.length / 4) };
   },
   async still(t, sync) {
     const s = ++seq;
@@ -170,6 +188,20 @@ try {
     writeFileSync(f, Buffer.from(r.png, 'base64'));
     ours.set(t, f);
     console.log(`ours t=${t.toFixed(2)} ${r.plate} ${r.renderMs.toFixed(1)} ms -> ${f}`);
+  }
+  if (flag('determinism')) {
+    // cold render, the same time again (SwiftShader noise), other times (seeks), then back to the time
+    const rows = [];
+    for (const t of times) {
+      const plate = await page.evaluate(([t]) => window.__show.grab(t, 'a'), [t]);
+      await page.evaluate(([t]) => window.__show.grab(t, 'b'), [t]);
+      for (const u of [t + 11.3, Math.max(0, t - 23.7), t + 0.5]) await page.evaluate(([u]) => window.__show.grab(u, 'x'), [u]);
+      await page.evaluate(([t]) => window.__show.grab(t, 'c'), [t]);
+      const noise = await page.evaluate(() => window.__show.compare('a', 'b')), replay = await page.evaluate(() => window.__show.compare('a', 'c'));
+      rows.push({ t, plate, noise, replay });
+      console.log(`determinism ${String(plate).padEnd(10)} t=${t.toFixed(2).padStart(7)}  same-time rerender: max ${noise.max} (${noise.off.toFixed(3)}% px)  after seeks: max ${replay.max} (${replay.off.toFixed(3)}% px)`);
+    }
+    writeFileSync(join(OUT, 'determinism.json'), JSON.stringify(rows, null, 1));
   }
   if (flag('timing')) {
     // warm frames then 6 timed frames per plate at spread times (GPU-synchronised)
