@@ -4,7 +4,10 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { resolve as resolvePath } from 'node:path';
+import { Worker as NodeWorker } from 'node:worker_threads';
+import { pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SongMapAnalyzer, planRegions } from '../src/song-map/analyzer.ts';
@@ -368,6 +371,40 @@ const idOf = (fx: { left: Float32Array }) => createHash('sha256').update(Buffer.
   assert.equal(d.state.revision, d.state.update!.revision);
   for (const session of [a, b, c, d]) session.close();
   log('host adapters: bridge and HTTP library transports, real library server round trip, lazy decode, hold/release, live warm-up: PASS');
+}
+
+// ------------------------------------------------------------------------------------------ real worker thread
+{
+  // The shipped worker entry (src/song-map/song-map.worker.ts) in a real thread with real transfer semantics. Only the
+  // Worker/`self` plumbing is shimmed: worker_threads stands in for the browser Worker.
+  const scratch = await mkdtemp(join(tmpdir(), 'aaavs-song-map-thread-'));
+  try {
+    const bundle = join(scratch, 'worker-body.mjs'), entry = join(scratch, 'worker-entry.mjs');
+    // esbuild is resolved from the project (the check itself runs from a scratch bundle).
+    const { build } = await import(pathToFileURL(resolvePath('node_modules/esbuild/lib/main.js')).href) as typeof import('esbuild');
+    await build({ entryPoints: [resolvePath('src/song-map/song-map.worker.ts')], outfile: bundle, bundle: true, platform: 'node', format: 'esm', target: 'es2022', logLevel: 'silent' });
+    await writeFile(entry, `import { parentPort } from 'node:worker_threads';
+globalThis.self = { postMessage: (message, transfer) => parentPort.postMessage(message, transfer), set onmessage(handler) { parentPort.on('message', data => handler({ data })); } };
+await import(${JSON.stringify(pathToFileURL(bundle).href)});
+parentPort.postMessage({ type: 'booted', job: -1 });
+`);
+    const thread = new NodeWorker(entry);
+    await new Promise<void>(resolve => thread.once('message', () => resolve()));
+    const like: WorkerLike = {
+      onmessage: null,
+      postMessage: (message, transfer) => thread.postMessage(message, transfer as never),
+      terminate: () => { void thread.terminate(); },
+    };
+    thread.on('message', data => like.onmessage?.({ data }));
+    const updates: SongMapUpdate[] = [];
+    const shortFx = renderFixture({ ...houseSpec, arrangement: [{ role: 'intro', bars: 4 }, { role: 'groove', bars: 8 }, { role: 'drop', bars: 4 }], seed: 5 });
+    const scan = new SongMapScan({ worker: like, source: arraySource(houseSpec.sampleRate, shortFx.left, shortFx.right), coreSeconds: 12, firstCoreSeconds: 12, onUpdate: u => updates.push(u) });
+    assert.equal(await scan.start(), 'complete');
+    assert.deepEqual(updates.at(-1)!.map, scanWhole(houseSpec.sampleRate, shortFx.left, shortFx.right).map, 'the worker thread reproduces the in-process scan exactly');
+    assert.ok(updates.length >= 3 && updates.every((u, i) => u.revision === i + 1));
+    like.terminate();
+    log(`worker thread: shipped entry, structured clone and transferred buffers, ${updates.length} revisions identical to in-process: PASS`);
+  } finally { await rm(scratch, { recursive: true, force: true }); }
 }
 
 // ------------------------------------------------------------------------------------------ helpers
