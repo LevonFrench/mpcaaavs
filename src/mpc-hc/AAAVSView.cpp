@@ -178,11 +178,12 @@ void AAAVSView::Close() {
     if (state->host) { DestroyWindow(state->host); state->host = nullptr; }
 }
 void AAAVSView::Resize() {
-    if (state->controller && IsWindow(state->parent)) {
-        RECT bounds; GetClientRect(state->parent, &bounds);
-        if (state->host) MoveWindow(state->host, 0, 0, bounds.right, bounds.bottom, TRUE);
-        state->controller->put_Bounds(bounds);
-    }
+    // The wrapper exists before the WebView controller does; resize it independently so its clipping bounds
+    // follow the artwork area while creation is pending. The controller completion resynchronizes both.
+    if (!IsWindow(state->parent)) return;
+    RECT bounds; GetClientRect(state->parent, &bounds);
+    if (state->host) MoveWindow(state->host, 0, 0, bounds.right, bounds.bottom, TRUE);
+    if (state->controller) state->controller->put_Bounds(bounds);
 }
 void AAAVSView::Command(UINT command) {
     if (command == ID_AAAVS_MANAGER || command == ID_AAAVS_SETUPS) {
@@ -306,7 +307,11 @@ void AAAVSView::Tick(HWND parent, bool visible, bool playing, LONGLONG position,
                             }
                             CoTaskMemFree(message); return S_OK;
                         }).Get(), &token);
-                        RECT bounds; GetClientRect(s->parent, &bounds); controller->put_Bounds(bounds);
+                        // Resynchronize the wrapper and the controller to the current artwork area: resizes
+                        // during creation moved only the wrapper, and the parent may have changed since.
+                        RECT bounds; GetClientRect(s->parent, &bounds);
+                        if (s->host) MoveWindow(s->host, 0, 0, bounds.right, bounds.bottom, TRUE);
+                        controller->put_Bounds(bounds);
                         controller->put_IsVisible(FALSE);
                         const HRESULT navigation = s->web->Navigate(L"https://aaavs.invalid/mpc.html");
                         if (FAILED(navigation)) s->InitializationFailed();
