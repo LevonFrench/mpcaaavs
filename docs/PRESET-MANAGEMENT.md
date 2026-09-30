@@ -47,4 +47,10 @@ Saved setup data lives in `visualizer/avs presets/setups.json` relative to the e
 - Host and selection fixtures: committed-preset shortcut routing, queued writes, every rating threshold, empty and singleton pools, manual/automatic/setup filtering, timed shuffle, direct retesting, and pending-selection cancellation.
 - Existing audio, clock, navigation, safety and lifecycle regressions remain required.
 
-No player, browser, or GPU was launched during implementation. Native compilation and CPU checks do not establish visual, focus, DPI, or live shortcut acceptance in WebView2.
+Earlier implementation checkpoints were CPU-only. The subsequent shared Player audition tested a showcase scene, synthetic local audio playback and a narrow manager view. Native compilation and CPU checks still do not establish DPI or live shortcut acceptance in WebView2.
+
+## Folders and HUD packs
+
+Preset Manager has separate AVS, NERV and HUD pack roots. Select a folder and use **Play folder**; **Ctrl+F8** replays the last folder. Folder playback has no 500-preset setup cap. Saving a large folder as a setup reports members omitted by the saved-setup limit. A folder's saved playback options override its built-in defaults; sorting alone retains built-in playback defaults. Folder playback replaces the active setup, and browsing a folder does not change the playback source.
+
+HUD pack labels and built-in timing defaults are shared between hosts. Local private title overlays may change displayed names. Generated packs remain local; see [HUD packs](HUD-PACKS.md). Recent and most-played views use private local statistics. Narrow layouts move focus into the visible preset list when a folder opens.

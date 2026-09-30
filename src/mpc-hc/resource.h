@@ -12,6 +12,7 @@
 #define ID_AAAVS_RATE_DOWN 31007
 #define ID_AAAVS_RATE_UP 31008
 #define ID_AAAVS_NOT_WORKING 31009
+#define ID_AAAVS_PLAY_FOLDER 31010
 #define IDR_MAINFRAME                   128
 #define IDR_POPUP                       130
 #define IDR_POPUPMAIN                   133

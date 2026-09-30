@@ -18,6 +18,7 @@ globalThis.fixtureCatalog=[
   {id:'avs',name:'Legacy',fileName:'legacy.avs',kind:'avs',autoEligible:true,sha256:fixtureHash,bytes:2},
   {id:'broken',name:'Retest',fileName:'retest.avs',kind:'avs',notWorking:true,autoEligible:true,sha256:fixtureHash,bytes:2},
   {id:'nerv',name:'NERV',fileName:'boot.nerv',kind:'nerv',autoEligible:true,sha256:'c'.repeat(64),bytes:2},
+  {id:'hud',name:'HUD',fileName:'duel.hud',kind:'hud',autoEligible:true,sha256:'d'.repeat(64),bytes:2,hud:{id:'fixture-duel',pack:'showcase',family:'fighting',tags:[],tier:'tuned',order:1,canvas:{style:'pixel',w:384,h:224}}},
 ];
 globalThis.loaded=[];
 const {AVS_PRESET_SOURCES:registry}=await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
@@ -27,6 +28,20 @@ await (await registry.require('local','broken')).load();
 assert.deepEqual(globalThis.loaded,['broken'],'not-working AVS remains manually retestable');
 await assert.rejects(registry.require('local','nerv'),/Unknown/);
 assert.deepEqual(globalThis.loaded,['broken'],'a NERV manifest never enters the AVS executor');
+await assert.rejects(registry.require('local','hud'),/Unknown/);
+assert.deepEqual(globalThis.loaded,['broken'],'a HUD manifest never enters the AVS executor or the Studio registry');
 registry.invalidate('local');
 assert.equal((await registry.list('local')).length,2);
-console.log('Mixed catalog: NERV isolation, failure exclusions, manual retest and refresh PASS');
+// A catalog made only of scene manifests (or of an unrecognised kind) leaves the Studio registry empty rather than failing.
+const scene=(id,kind,fileName,sha)=>({id,name:id,fileName,kind,autoEligible:true,sha256:sha.repeat(64),bytes:2});
+globalThis.fixtureCatalog=[scene('n1','nerv','a.nerv','1'),scene('h1','hud','b.hud','2'),scene('h2','hud','c.hud','3'),scene('x1','future-kind','d.future','4')];
+registry.invalidate('local');
+assert.deepEqual(await registry.list('local'),[],'scene-only catalog: no Studio presets');
+assert.deepEqual(await registry.autoBank('local'),[],'scene-only catalog: empty Auto bank');
+for(const id of ['n1','h1','h2','x1']) await assert.rejects(registry.require('local',id),/Unknown/,`${id} is never an AVS preset`);
+assert.deepEqual(globalThis.loaded,['broken'],'nothing further reached the AVS loader');
+// Folder hints and origins ride on catalog rows without changing what the Studio registry lists.
+globalThis.fixtureCatalog=[{id:'avs',name:'Legacy',fileName:'legacy.avs',kind:'avs',autoEligible:true,sha256:fixtureHash,bytes:2,folder:'HUD packs/Showcase',origins:[{package:'p',path:'a/b.avs'}]},scene('h1','hud','b.hud','2')];
+registry.invalidate('local');
+assert.deepEqual((await registry.list('local')).map(p=>p.id),['avs'],'folder hints do not change Studio membership');
+console.log('Mixed catalog: NERV and HUD isolation, failure exclusions, manual retest and refresh PASS');

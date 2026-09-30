@@ -17,11 +17,12 @@ DOCUMENTS = (
     'docs/BUILDING.md', 'docs/RELEASING.md', 'docs/RELEASE-NOTES.md',
     'docs/PRESET-MANAGEMENT.md', 'docs/NERV-SCENES.md', 'docs/AUDIO-WIRING.md',
     'docs/AVS-TRANSITIONS.md', 'docs/MPC-HC-UPSTREAM-README.md', 'docs/Compilation.md',
-    'docs/Authors.txt',
+    'docs/Authors.txt', 'docs/HUD-PACKS.md',
 )
 RUNTIME_FILES = (
     f'{PRODUCT}.exe', 'visualizer/mpc.html', 'visualizer/dist/mpc-host.js',
     'visualizer/dist/avs-render.worker.js', 'visualizer/dist/nerv-render.worker.js',
+    'visualizer/dist/hud-render.worker.js',
 )
 
 

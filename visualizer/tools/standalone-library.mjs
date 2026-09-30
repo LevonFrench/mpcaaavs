@@ -11,17 +11,27 @@ const ASSET_LIMIT = 64 * 1024 * 1024;
 const HASH = /^[0-9a-f]{64}$/;
 const defaults = { enabled:true, bars:0, shuffle:false, minimumRating:0, transition:1, beats:0, durationMs:2000, keepOld:true, manualFade:true, autoFade:true };
 const defaultTiming = { enabled:false, bpm:120, offsetSeconds:0, barsPerScene:8, seed:1 };
+// Optional v2 fade fields (contract 2.2.1): copied only when present; a present invalid value is rejected.
+const FADE_FIELDS = [['fadeTiming',0,6],['fadeRandomSet',1,31],['fadeAnchor',0,2],['queueQuantize',0,3]];
+const STATE_NAMES = ['folders','stats'];
+const STATE_MAX_BYTES = 3670016;
 
 function requireValue(condition, message) { if (!condition) throw Error(message); }
 function settings(value) {
   requireValue(value && typeof value === 'object' && !Array.isArray(value), 'Invalid settings');
   requireValue([0,2,4,8,12].includes(value.bars) && [0,1,2,4].includes(value.beats)
-    && Number.isInteger(value.transition) && value.transition >= 0 && value.transition <= 15
+    && Number.isInteger(value.transition) && value.transition >= 0 && value.transition <= 32
     && Number.isInteger(value.durationMs) && value.durationMs >= 250 && value.durationMs <= 8000
     && ['enabled','shuffle','keepOld','manualFade','autoFade'].every(key => typeof value[key] === 'boolean'), 'Invalid settings');
   const minimumRating = value.minimumRating === undefined ? 0 : value.minimumRating;
   requireValue(Number.isInteger(minimumRating) && minimumRating >= 0 && minimumRating <= 5, 'Invalid minimum rating');
-  return Object.fromEntries(Object.keys(defaults).map(key => [key, key === 'minimumRating' ? minimumRating : value[key]]));
+  const result = Object.fromEntries(Object.keys(defaults).map(key => [key, key === 'minimumRating' ? minimumRating : value[key]]));
+  for (const [key, low, high] of FADE_FIELDS) {
+    if (value[key] === undefined) continue;
+    requireValue(Number.isInteger(value[key]) && value[key] >= low && value[key] <= high, 'Invalid settings');
+    result[key] = value[key];
+  }
+  return result;
 }
 function timing(value) {
   if (value === undefined) return { ...defaultTiming };
@@ -30,7 +40,56 @@ function timing(value) {
     && Number.isFinite(value.offsetSeconds) && Math.abs(value.offsetSeconds) <= 3600
     && Number.isInteger(value.barsPerScene) && value.barsPerScene >= 1 && value.barsPerScene <= 128
     && Number.isInteger(value.seed) && value.seed >= 0 && value.seed <= 0xffffffff, 'Invalid scene timing');
-  return Object.fromEntries(Object.keys(defaultTiming).map(key => [key,value[key]]));
+  const result = Object.fromEntries(Object.keys(defaultTiming).map(key => [key,value[key]]));
+  return { ...result, ...timingV2(value) };
+}
+// Scene timing v2 (contract 2.2.2). Default-valued fields are omitted and `version: 2` is written only when a v2
+// field survives, so a v1 timing serialises as exactly its five keys. Unknown keys are dropped; version > 2 is tolerated.
+function timingV2(value) {
+  const finite = x => typeof x === 'number' && Number.isFinite(x);
+  const integerIn = (x, low, high) => Number.isInteger(x) && x >= low && x <= high;
+  const fail = name => requireValue(false, `Scene timing ${name} is invalid`);
+  const out = {};
+  // No upper bound, exactly like the shared parser: any whole number from 1 is a tolerated future version.
+  if (value.version !== undefined) requireValue(Number.isInteger(value.version) && value.version >= 1, 'Scene timing version is invalid');
+  if (value.beatsPerBar !== undefined) { requireValue(integerIn(value.beatsPerBar, 1, 16), 'Scene timing beatsPerBar is invalid'); if (value.beatsPerBar !== 4) out.beatsPerBar = value.beatsPerBar; }
+  if (value.barsPattern !== undefined) {
+    requireValue(Array.isArray(value.barsPattern) && value.barsPattern.length >= 1 && value.barsPattern.length <= 64 && value.barsPattern.every(x => integerIn(x, 1, 128)), 'Scene timing barsPattern is invalid');
+    out.barsPattern = [...value.barsPattern];
+  }
+  if (value.patternHold !== undefined) { requireValue(typeof value.patternHold === 'boolean', 'Scene timing patternHold is invalid'); if (value.patternHold) out.patternHold = true; }
+  if (value.tempoMap !== undefined) {
+    const map = value.tempoMap;
+    requireValue(Array.isArray(map) && map.length >= 1 && map.length <= 256, 'Scene timing tempoMap is invalid');
+    let previous = value.offsetSeconds;
+    out.tempoMap = map.map(entry => {
+      if (!entry || typeof entry !== 'object' || !finite(entry.at) || !finite(entry.bpm) || entry.bpm < 20 || entry.bpm > 400 || entry.at <= previous || entry.at > 1e6) fail('tempoMap');
+      previous = entry.at;
+      return { at:entry.at, bpm:entry.bpm };
+    });
+  }
+  if (value.script !== undefined) {
+    requireValue(Array.isArray(value.script) && value.script.length <= 1024, 'Scene timing script is invalid');
+    let previous = -1;
+    const script = value.script.map(entry => {
+      if (!entry || typeof entry !== 'object' || !Number.isSafeInteger(entry.ordinal) || entry.ordinal <= previous || typeof entry.preset !== 'string' || !HASH.test(entry.preset)) fail('script');
+      previous = entry.ordinal;
+      return { ordinal:entry.ordinal, preset:entry.preset };
+    });
+    if (script.length) out.script = script;
+  }
+  if (value.intervals !== undefined) {
+    requireValue(Array.isArray(value.intervals) && value.intervals.length <= 64, 'Scene timing intervals are invalid');
+    const ids = new Set();
+    const intervals = value.intervals.map(entry => {
+      if (!entry || typeof entry !== 'object' || typeof entry.id !== 'string' || !/^[a-z0-9_-]{1,32}$/.test(entry.id) || ids.has(entry.id)
+        || !finite(entry.startBeat) || !finite(entry.endBeat) || entry.startBeat < 0 || entry.startBeat >= entry.endBeat || entry.endBeat > 1e7) fail('intervals');
+      ids.add(entry.id);
+      return { id:entry.id, startBeat:entry.startBeat, endBeat:entry.endBeat };
+    });
+    if (intervals.length) out.intervals = intervals;
+  }
+  return Object.keys(out).length ? { version:2, ...out } : {};
 }
 function setups(value) {
   requireValue(Array.isArray(value) && value.length <= 100, 'At most 100 setups are allowed');
@@ -44,6 +103,50 @@ function setups(value) {
     ids.add(item.id);
     return { id:item.id, name:item.name.trim(), presets:[...item.presets], settings:settings(item.settings), timing:timing(item.timing) };
   });
+}
+
+// Shallow validation of the page's private state files (BRW 5.3/5.4). The page parser is the authority; this only bounds
+// shape and size so the server never stores something the page could not have written.
+const plain = x => x !== null && typeof x === 'object' && !Array.isArray(x);
+const shortText = (x, max) => typeof x === 'string' && x.length <= max;
+function stateName(name) { requireValue(typeof name === 'string' && STATE_NAMES.includes(name), 'Unknown state file'); return name; }
+function stateBody(name, value) {
+  requireValue(plain(value) && Number.isInteger(value.version) && value.version >= 1, 'Invalid state file');
+  if (name === 'folders') {
+    if (value.folders !== undefined) {
+      requireValue(Array.isArray(value.folders) && value.folders.length <= 200, 'Invalid state file');
+      let members = 0;
+      for (const folder of value.folders) {
+        requireValue(plain(folder) && shortText(folder.id, 100) && folder.id.length > 0 && shortText(folder.name, 120)
+          && (folder.parent === undefined || folder.parent === null || shortText(folder.parent, 100))
+          && (folder.kind === undefined || shortText(folder.kind, 16))
+          && (folder.query === undefined || shortText(folder.query, 400))
+          && (folder.scope === undefined || folder.scope === null || shortText(folder.scope, 400)), 'Invalid state file');
+        if (folder.presets !== undefined) {
+          requireValue(Array.isArray(folder.presets) && folder.presets.length <= 5000 && folder.presets.every(hash => typeof hash === 'string' && HASH.test(hash)), 'Invalid state file');
+          members += folder.presets.length;
+        }
+      }
+      requireValue(members <= 30000, 'Invalid state file');
+    }
+    if (value.playback !== undefined) {
+      requireValue(plain(value.playback) && Object.keys(value.playback).length <= 300 && Object.keys(value.playback).every(key => key.length <= 400), 'Invalid state file');
+    }
+    requireValue(value.last === undefined || value.last === null || (plain(value.last) && shortText(value.last.key, 400)), 'Invalid state file');
+    if (value.ui !== undefined) {
+      requireValue(plain(value.ui) && (value.ui.expanded === undefined || (Array.isArray(value.ui.expanded) && value.ui.expanded.length <= 300 && value.ui.expanded.every(key => shortText(key, 400))))
+        && (value.ui.selected === undefined || value.ui.selected === null || shortText(value.ui.selected, 400)), 'Invalid state file');
+    }
+  } else {
+    if (value.plays !== undefined) {
+      requireValue(plain(value.plays), 'Invalid state file');
+      const keys = Object.keys(value.plays);
+      requireValue(keys.length <= 20000 && keys.every(key => HASH.test(key) && Array.isArray(value.plays[key]) && value.plays[key].length === 2
+        && value.plays[key].every(x => typeof x === 'number' && Number.isFinite(x) && x >= 0)), 'Invalid state file');
+    }
+  }
+  requireValue(Buffer.byteLength(JSON.stringify(value)) <= STATE_MAX_BYTES, 'State is too large');
+  return value;
 }
 
 async function noLinks(path, allowMissing = false) {
@@ -93,7 +196,7 @@ async function atomicJson(path, value) {
 function presetPath(root, value) {
   requireValue(typeof value === 'string' && value.length <= 2048 && value.startsWith('presets/unique/')
     && !/[\\%:\x00-\x1f]/.test(value) && !value.split('/').some(part => !part || part === '.' || part === '..')
-    && ['.avs','.nerv'].includes(extname(value)), 'Invalid preset path');
+    && ['.avs','.nerv','.hud'].includes(extname(value)), 'Invalid preset path');
   const result = resolve(root, value), rel = relative(root, result);
   requireValue(!isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${sep}`), 'Preset escaped collection');
   return result;
@@ -208,6 +311,16 @@ export function createLibraryHandler(root) {
           const value = settings(request.settings); await atomicJson(join(privateRoot,'settings.json'),value);
           return {type:'settings',...value};
         }
+        case 'load-state': {
+          const name = stateName(request.name), data = await jsonFile(join(privateRoot,`${name}.json`),null);
+          if (data !== null) { try { stateBody(name,data); } catch { throw Error('Saved state is corrupt or too large'); } }
+          return {type:'state-loaded',name,data};
+        }
+        case 'save-state': {
+          const name = stateName(request.name), data = stateBody(name,request.data);
+          await atomicJson(join(privateRoot,`${name}.json`),data);
+          return {type:'state-saved',name};
+        }
         default: throw Error('Unknown library request');
       }
     } finally {
@@ -226,7 +339,7 @@ export function createLibraryHandler(root) {
     catch { send(res,400,{type:'library-error',operation:'',message:'Invalid request path'}); return true; }
     // Deny hidden state and transaction artifacts before the static file server.
     if (path.split('/').some(part => part.replace(/[. ]+$/, '').toLowerCase() === '.aaavs-private' || /\.(?:writing|lock)[. ]*$/i.test(part))
-      || /^\/avs presets\/(?:setups|settings)\.json$/i.test(path)) {
+      || /^\/avs presets\/(?:setups|settings|folders|stats)\.json$/i.test(path)) {
       send(res,404,{type:'library-error',operation:'',message:'Not found'}); return true;
     }
     if(path !== '/api/aaavs/library') {

@@ -9,10 +9,14 @@ function records(value: unknown, key: 'presets' | 'dependencies'): RecordEntry[]
     if (!row || typeof row.sha256 !== 'string' || !/^[a-f0-9]{64}$/i.test(row.sha256)
       || typeof row.canonical_path !== 'string') throw new Error('Invalid dependency record');
     localAssetUrl(row.canonical_path, key, base());
-    // Public NERV manifests share the preset catalog but have no legacy package
+    // Public NERV and HUD manifests share the preset catalog but have no legacy package
     // origins or bitmap dependencies. Do not apply AVS origin rules to them.
     if (key === 'presets' && row.kind === 'nerv') {
       if (!row.canonical_path.endsWith('.nerv') || !NERV_SCENES.some(scene => scene === row.scene)) throw new Error('Invalid NERV dependency record');
+      return [];
+    }
+    if (key === 'presets' && row.kind === 'hud') {
+      if (!row.canonical_path.endsWith('.hud')) throw new Error('Invalid HUD dependency record');
       return [];
     }
     if (!Array.isArray(row.occurrences) || row.occurrences.length > 1024

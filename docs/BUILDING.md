@@ -41,3 +41,7 @@ This startup check uses the real built host and files but substitutes the worker
 Lite uses installed DirectShow codecs instead of bundling internal LAV filters. Target computers also need the Microsoft Edge WebView2 Runtime and the Microsoft DirectX End-User Runtime (including D3DX9_43). Optional MediaInfo and icon-library DLLs may be absent. A full self-contained codec release requires the upstream full build and its dependency packaging; the preview packager does not create that variant.
 
 The [release guide](RELEASING.md) covers the public-only archive and verification steps.
+
+## Shared HUD runtime
+
+`npm run build:mpc` and `npm run build:player` include the shared HUD worker. Run `npm run check` for the shared timing, resolution, folder browser, HUD engine, generator and installer CPU gates. See [HUD packs](HUD-PACKS.md) for local generation and installation into a separate audition collection. Generated HUD packs, source kits and private overlays are excluded from releases and the stock mirror.

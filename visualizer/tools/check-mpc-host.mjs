@@ -6,14 +6,14 @@ for (const id of ['visualizer', 'preset', 'timing', 'status']) assert.ok(html.in
 const result = await build({entryPoints:['src/mpc-host.ts'],bundle:true,format:'esm',write:false,define:{'import.meta.url':'"https://aaavs.invalid/dist/mpc-host.js"'},plugins:[{name:'fixture-catalog',setup(b){
  b.onResolve({filter:/local-collection\.ts$/},()=>({path:'catalog',namespace:'test'}));
  b.onResolve({filter:/mpc-bitmap-dependencies\.ts$/},()=>({path:'bitmaps',namespace:'test'}));
- b.onLoad({filter:/.*/,namespace:'test'},args=>({contents:args.path==='catalog'?`export async function fetchLocalAvsCatalog(){if(globalThis.fixtureCatalogFailure)throw Error('catalog missing');return [0,1,2,3].map(i=>({name:'preset '+i,sha256:''+i,autoEligible:true}));} export function fetchLocalAvsPreset(p){return globalThis.fixtureFetch(p);}`:`export async function loadPresetBitmaps(){return [];}`}));
+ b.onLoad({filter:/.*/,namespace:'test'},args=>({contents:args.path==='catalog'?`export async function fetchLocalAvsCatalog(){if(globalThis.fixtureCatalogFailure)throw Error('catalog missing');return [0,1,2,3].map(i=>({name:'preset '+i,sha256:''+i,autoEligible:true}));} export function fetchLocalAvsPreset(p){return globalThis.fixtureFetch(p);} export function isSceneKind(p){return p?.kind==='nerv'||p?.kind==='hud'} export async function fetchLocalAvsSources(){return new Map()}`:`export async function loadPresetBitmaps(){return [];}`}));
 }}]});
 const posted=[], fetches=[], workers=[], nodes=new Map(), timers=new Map();
 let retryButton, reloaded=false;
 let timer=0, now=0, listener, raf, keydown, pagehide, draws=0, probeFailed=false;
 Object.defineProperty(globalThis,'performance',{value:{now:()=>now},configurable:true});
-globalThis.fixtureFetch=preset=>new Promise((resolve,reject)=>fetches.push({preset,resolve:()=>resolve(new Uint8Array(4)),reject}));
-const ctx={globalAlpha:1,drawImage(){draws++;},getImageData(){if(probeFailed)throw Error('probe unavailable');return {data:new Uint8ClampedArray(256*144*4)};},save(){},restore(){},beginPath(){},rect(){},clip(){},fillRect(){},createPattern(){return {};}};
+globalThis.fetch=async()=>{throw Error('offline fixture')};globalThis.fixtureFetch=preset=>new Promise((resolve,reject)=>fetches.push({preset,resolve:()=>resolve(new Uint8Array(4)),reject}));
+const ctx={clearRect(){},setTransform(){},globalAlpha:1,drawImage(){draws++;},getImageData(){if(probeFailed)throw Error('probe unavailable');return {data:new Uint8ClampedArray(256*144*4)};},save(){},restore(){},beginPath(){},rect(){},clip(){},fillRect(){},createPattern(){return {};}};
 class Element {
  constructor(tag){this.tagName=tag;this.children=[];this.attributes={};this.textContent='';this.value='';}
  append(...items){this.children.push(...items);}prepend(...items){this.children.unshift(...items);}

@@ -5,11 +5,20 @@
  *
  * These are stateless live-audio instruments, not the original video's analysed
  * stems. Every moving part is computed from media time, seed and this audio frame.
+ *
+ * Resolution: every coordinate is in the 960x540 design canvas and the entry point installs the letterbox transform, so a larger surface draws the same
+ * layout with more device pixels (sharper, not merely larger). Hairlines, fills, clip edges and text baselines are snapped onto device pixels through the
+ * helpers of render-resolution.ts (docs/design/RESOLUTION-PIPELINE.md 6). Nothing measures text and nothing reads the clock.
  */
 import type { AvsAudioFrame } from './avs/types.ts';
+import type { ClockGrid, TimingSignals } from './mpc-timing-types.ts';
+import { compileClockGrid, timingSignals } from './mpc-beat-grid.ts';
+import { NERV_DESIGN, applyDesignTransform, snapBaseline, snapSpan, snapStroke, strokePx, surfaceMetrics, type SurfaceMetrics } from './render-resolution.ts';
+export { NERV_DESIGN };
 
 export const NERV_SCENES = ['boot', 'magi', 'psycho', 'radar', 'harmonics', 'seele', 'battery', 'atfield', 'alert', 'plug', 'target', 'city', 'sync', 'berserk', 'impact', 'end'] as const;
 export type NervSceneId = typeof NERV_SCENES[number];
+export type NervClockGrid = ClockGrid;
 export interface NervSceneFrame {
   readonly scene: NervSceneId;
   readonly time: number;
@@ -18,6 +27,10 @@ export interface NervSceneFrame {
   readonly bpm: number;
   readonly seed: number;
   readonly audio: AvsAudioFrame;
+  /** Saved musical grid, scene start and end (absolute media seconds). Absent means the legacy tempo-only derivation. */
+  readonly grid?: NervClockGrid;
+  readonly sceneStart?: number;
+  readonly sceneEnd?: number;
 }
 type Context = OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D;
 const TAU = Math.PI * 2;
@@ -31,18 +44,46 @@ function noise(index: number, seed: number): number {
   n = Math.imul(n ^ n >>> 16, 0x45d9f3b);
   return ((n ^ n >>> 16) >>> 0) / 4294967296;
 }
+// ---- Pixel snapping on the design canvas. Rendering is synchronous and one call at a time per worker, so the metrics of the surface being drawn live in one
+// module-level value that the entry point sets and resets. The helpers move coordinates by at most half a device pixel, so the drawing streams of every surface size match
+// apart from those snap offsets: same operations, same order, same strings and font sizes.
+const DEFAULT_METRICS: SurfaceMetrics = surfaceMetrics(NERV_DESIGN.width, NERV_DESIGN.height, NERV_DESIGN.width, NERV_DESIGN.height);
+let M: SurfaceMetrics = DEFAULT_METRICS;
+/** Width of a decorative stroke in design units, never thinner than one device pixel. */
+const hair = (width: number): number => Math.max(width, 1 / M.scale);
+/** Fill rectangle with both edges on device pixels. Rectangles that share an edge expression round identically, so they neither overlap nor leave a seam. */
+function rect(c: Context, x: number, y: number, w: number, h: number): void {
+  const [sx, sw] = snapSpan(M, 'x', x, w), [sy, sh] = snapSpan(M, 'y', y, h);
+  c.fillRect(sx, sy, sw, sh);
+}
+/** Rectangle outline whose outer edge is the snapped fill edge: the stroke sits inside it, half its device width in from each side. */
+function outline(c: Context, x: number, y: number, w: number, h: number, color: string, width = 1): void {
+  const px = strokePx(M, width), half = px / 2 / M.scale;
+  const [sx, sw] = snapSpan(M, 'x', x, w), [sy, sh] = snapSpan(M, 'y', y, h);
+  c.strokeStyle = color; c.lineWidth = px / M.scale;
+  c.strokeRect(sx + half, sy + half, Math.max(0, sw - 2 * half), Math.max(0, sh - 2 * half));
+}
+/** Clip to a rectangle whose edges are on device pixels (a fractional clip edge is a soft edge). The caller owns save and restore. */
+function clipRect(c: Context, x: number, y: number, w: number, h: number): void {
+  const [sx, sw] = snapSpan(M, 'x', x, w), [sy, sh] = snapSpan(M, 'y', y, h);
+  c.beginPath(); c.rect(sx, sy, sw, sh); c.clip();
+}
+// Text keeps its design x (subpixel glyph positioning) and only the baseline moves onto a device row.
 function label(c: Context, value: string, x: number, y: number, size = 12, color = ORANGE, align: CanvasTextAlign = 'left'): void {
   c.font = `600 ${size}px Consolas, "Courier New", monospace`;
-  c.fillStyle = color; c.textAlign = align; c.textBaseline = 'alphabetic'; c.fillText(value, x, y);
+  c.fillStyle = color; c.textAlign = align; c.textBaseline = 'alphabetic'; c.fillText(value, x, snapBaseline(M, y));
 }
 function title(c: Context, value: string, x: number, y: number, size: number, color = BONE, squeeze = .7): void {
-  c.save(); c.translate(x, y); c.scale(squeeze, 1);
+  c.save(); c.translate(x, snapBaseline(M, y)); c.scale(squeeze, 1);
   c.font = `bold ${size}px Georgia, "Times New Roman", serif`;
   c.textAlign = 'left'; c.textBaseline = 'alphabetic'; c.fillStyle = color;
   c.fillText(value, 0, 0); c.restore();
 }
 function line(c: Context, x1: number, y1: number, x2: number, y2: number, color = ORANGE, width = 1): void {
-  c.strokeStyle = color; c.lineWidth = width; c.beginPath(); c.moveTo(x1, y1); c.lineTo(x2, y2); c.stroke();
+  // Whole device pixels wide, never thinner than one. An axis-aligned line has its constant coordinate moved so both stroke edges land on device pixels; diagonals keep their coordinates.
+  const px = strokePx(M, width);
+  if (x1 === x2) x1 = x2 = snapStroke(M, 'x', x1, px); else if (y1 === y2) y1 = y2 = snapStroke(M, 'y', y1, px);
+  c.strokeStyle = color; c.lineWidth = px / M.scale; c.beginPath(); c.moveTo(x1, y1); c.lineTo(x2, y2); c.stroke();
 }
 function polygon(c: Context, x: number, y: number, r: number, sides: number, angle = 0): void {
   c.beginPath();
@@ -54,13 +95,16 @@ function polygon(c: Context, x: number, y: number, r: number, sides: number, ang
   c.closePath();
 }
 function circle(c: Context, x: number, y: number, r: number, color = ORANGE, width = 1): void {
-  c.strokeStyle = color; c.lineWidth = width; c.beginPath(); c.arc(x, y, Math.max(0, r), 0, TAU); c.stroke();
+  c.strokeStyle = color; c.lineWidth = hair(width); c.beginPath(); c.arc(x, y, Math.max(0, r), 0, TAU); c.stroke();
 }
 function panel(c: Context, x: number, y: number, w: number, h: number, text: string, color = ORANGE): void {
-  c.fillStyle = '#0c1111'; c.strokeStyle = color; c.lineWidth = 1;
-  c.beginPath(); c.moveTo(x, y); c.lineTo(x + w - 14, y); c.lineTo(x + w, y + 14);
-  c.lineTo(x + w, y + h); c.lineTo(x + 14, y + h); c.lineTo(x, y + h - 14); c.closePath(); c.fill(); c.stroke();
-  c.fillStyle = color; c.fillRect(x + 1, y + 1, Math.min(w - 18, 12 + text.length * 7), 20);
+  // The four axis-aligned edges are stroke centres snapped so both edges of the outline land on device pixels; the chamfers keep their 14-unit run.
+  const px = strokePx(M, 1);
+  const x0 = snapStroke(M, 'x', x, px), x1 = snapStroke(M, 'x', x + w, px), y0 = snapStroke(M, 'y', y, px), y1 = snapStroke(M, 'y', y + h, px);
+  c.fillStyle = '#0c1111'; c.strokeStyle = color; c.lineWidth = px / M.scale;
+  c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1 - 14, y0); c.lineTo(x1, y0 + 14);
+  c.lineTo(x1, y1); c.lineTo(x0 + 14, y1); c.lineTo(x0, y1 - 14); c.closePath(); c.fill(); c.stroke();
+  c.fillStyle = color; rect(c, x + 1, y + 1, Math.min(w - 18, 12 + text.length * 7), 20);
   label(c, text, x + 7, y + 15, 11, INK);
 }
 function brackets(c: Context, x: number, y: number, w: number, h: number, color = CYAN): void {
@@ -70,7 +114,7 @@ function brackets(c: Context, x: number, y: number, w: number, h: number, color 
   }
 }
 function hazard(c: Context, x: number, y: number, w: number, h: number, phase: number, color = ORANGE): void {
-  c.save(); c.beginPath(); c.rect(x, y, w, h); c.clip(); c.fillStyle = color;
+  c.save(); clipRect(c, x, y, w, h); c.fillStyle = color;
   for (let p = -h - 40 + ((phase % 40) + 40) % 40; p < w; p += 40) {
     c.beginPath(); c.moveTo(x + p, y + h); c.lineTo(x + p + h, y);
     c.lineTo(x + p + h + 18, y); c.lineTo(x + p + 18, y + h); c.closePath(); c.fill();
@@ -80,7 +124,7 @@ function hazard(c: Context, x: number, y: number, w: number, h: number, phase: n
 function meter(c: Context, x: number, y: number, w: number, h: number, value: number, color = GREEN, count = 24): void {
   const v = clamp(value), unit = w / count;
   for (let i = 0; i < count; i++) {
-    c.fillStyle = i / count < v ? color : '#172120'; c.fillRect(x + i * unit, y, Math.max(1, unit - 2), h);
+    c.fillStyle = i / count < v ? color : '#172120'; rect(c, x + i * unit, y, Math.max(1, unit - 2), h);
   }
 }
 function grid(c: Context, x: number, y: number, w: number, h: number, step = 30): void {
@@ -99,19 +143,22 @@ function band(audio: AvsAudioFrame, start: number, end: number): number {
   for (let i = start; i < end; i++) { const v = spectrumValue(audio, i); sum += v * v; peak = Math.max(peak, v); }
   return clamp(.6 * peak + .4 * Math.sqrt(sum / Math.max(1, end - start)));
 }
+/** Legacy band level (docs/design/CONTRACT.md S3): the HUD signal bus tests its `legacy` values against this exact function. */
+export { band as nervBand };
 function wave(audio: AvsAudioFrame, index: number, channel: 0 | 1): number {
   const b = audio.waveform[channel][index] ?? 0;
   return ((b ^ 128) - 128) / 128;
 }
 function scope(c: Context, audio: AvsAudioFrame, x: number, y: number, w: number, h: number, color = GREEN, channel: 0 | 1 = 0, points = 288): void {
   line(c, x, y + h / 2, x + w, y + h / 2, '#24443a');
-  c.strokeStyle = color; c.lineWidth = 1.5; c.beginPath();
+  // Round joins keep a dense noisy trace from growing miter spikes at high resolution; the polyline coordinates stay in design units.
+  c.save(); c.strokeStyle = color; c.lineWidth = hair(1.5); c.lineJoin = 'round'; c.beginPath();
   for (let i = 0; i < points; i++) {
     const xx = x + i / (points - 1) * w;
     const yy = y + h / 2 - wave(audio, Math.floor(i / (points - 1) * 575), channel) * h * .45;
     if (i) c.lineTo(xx, yy); else c.moveTo(xx, yy);
   }
-  c.stroke();
+  c.stroke(); c.restore();
 }
 function spectrum(c: Context, audio: AvsAudioFrame, x: number, y: number, w: number, h: number, color = ORANGE, count = 64, raw = false): void {
   const max = raw ? 576 : 512, unit = w / count;
@@ -120,8 +167,8 @@ function spectrum(c: Context, audio: AvsAudioFrame, x: number, y: number, w: num
     const from = raw ? Math.floor(i * max / count) : Math.floor(Math.expm1(i / count * Math.log(513)));
     const to = raw ? Math.floor((i + 1) * max / count) : Math.floor(Math.expm1((i + 1) / count * Math.log(513)));
     const v = band(audio, Math.min(from, max - 1), Math.min(max, Math.max(from + 1, to)));
-    c.fillStyle = color; c.fillRect(x + i * unit, y + h - v * h, Math.max(1, unit - 2), v * h);
-    c.fillStyle = '#243330'; c.fillRect(x + i * unit, y + h + 2, Math.max(1, unit - 2), 1);
+    c.fillStyle = color; rect(c, x + i * unit, y + h - v * h, Math.max(1, unit - 2), v * h);
+    c.fillStyle = '#243330'; rect(c, x + i * unit, y + h + 2, Math.max(1, unit - 2), 1);
   }
 }
 function hexField(c: Context, cx: number, cy: number, radius: number, t: number, low: number, high: number, seed: number, color = ORANGE): void {
@@ -130,18 +177,21 @@ function hexField(c: Context, cx: number, cy: number, radius: number, t: number,
     const distance = Math.hypot(x - cx, y - cy);
     if (distance > radius) continue;
     c.save(); c.globalAlpha = .12 + .35 * (1 - distance / radius) + high * .2;
-    c.strokeStyle = color; c.lineWidth = 1;
+    c.strokeStyle = color; c.lineWidth = hair(1);
     polygon(c, x, y, 24 + Math.sin(distance * .025 - t * 2) * (1 + low * 3), 6, Math.PI / 6); c.stroke();
     if (noise(row * 17 + col, seed) > .86) { c.globalAlpha *= .3 + low * .4; c.fillStyle = color; c.fill(); }
     c.restore();
   }
 }
-interface Signals { low: number; mid: number; high: number; level: number; beats: number; phase: number; bar: number }
+// beats, phase and bar come from timingSignals(): with no grid they are today's expressions exactly; with a grid they are the scene beats, the beat phase and the offset-aware bar.
+interface Signals { low: number; mid: number; high: number; level: number; beats: number; phase: number; bar: number; beatInBar: number; beatsPerBar: number; interval: TimingSignals['interval']; gridded: boolean }
 function chrome(c: Context, f: NervSceneFrame, a: Signals, accent: string): void {
   const index = NERV_SCENES.indexOf(f.scene) + 1;
   label(c, 'NERV / AUDIO TERMINAL', 24, 27, 14, accent);
   label(c, `${String(index).padStart(2, '0')} / 16   ${f.scene.toUpperCase()}`, 480, 27, 12, BONE, 'center');
   label(c, `${f.bpm.toFixed(1)} BPM  /  BAR ${String(a.bar + 1).padStart(4, '0')}`, 936, 27, 12, accent, 'right');
+  // One pip per beat of the bar, the current beat lit. Only with a valid saved grid: without one the plate is drawn exactly as before.
+  if (a.gridded) for (let i = 0; i < a.beatsPerBar; i++) { c.fillStyle = i === a.beatInBar ? accent : '#2a2a24'; rect(c, 936 - (a.beatsPerBar - i) * 11 + 3, 44, 8, 4); }
   line(c, 24, 39, 936, 39, accent);
   label(c, 'LO', 24, 62, 10, ORANGE); meter(c, 47, 53, 120, 8, a.low, ORANGE, 20);
   label(c, 'MID', 185, 62, 10, GREEN); meter(c, 216, 53, 120, 8, a.mid, GREEN, 20);
@@ -151,7 +201,7 @@ function chrome(c: Context, f: NervSceneFrame, a: Signals, accent: string): void
   label(c, `T+ ${f.time.toFixed(2).padStart(8, '0')}   /   LOCAL ${f.localTime.toFixed(2)}`, 24, 514, 11, accent);
   label(c, 'RAW AVS 576', 500, 514, 9, '#90a39a');
   spectrum(c, f.audio, 585, 499, 220, 16, accent, 48, true);
-  for (let i = 0; i < 4; i++) { c.fillStyle = i === Math.floor(a.beats) % 4 ? accent : '#24302b'; c.fillRect(838 + i * 25, 503, 17, 9); }
+  for (let i = 0; i < 4; i++) { c.fillStyle = i === Math.floor(a.beats) % 4 ? accent : '#24302b'; rect(c, 838 + i * 25, 503, 17, 9); }
 }
 function boot(c: Context, f: NervSceneFrame, a: Signals): void {
   panel(c, 24, 86, 524, 386, 'SYSTEM START');
@@ -161,9 +211,9 @@ function boot(c: Context, f: NervSceneFrame, a: Signals): void {
     if (i < reveal) { label(c, String(i).padStart(2, '0'), 43, 140 + i * 32, 11, '#798b7c'); label(c, value, 78, 140 + i * 32, 14, i > 3 ? GREEN : ORANGE); }
   });
   const cursorY = 140 + Math.min(8, reveal) * 32;
-  c.fillStyle = AMBER; c.fillRect(78, Math.min(445, cursorY), 9, 3);
+  c.fillStyle = AMBER; rect(c, 78, Math.min(445, cursorY), 9, 3);
   hexField(c, 752, 246, 156, f.localTime, a.low, a.high, f.seed);
-  c.strokeStyle = AMBER; c.lineWidth = 2; polygon(c, 752, 246, 100 + a.low * 14, 6, Math.PI / 6); c.stroke();
+  c.strokeStyle = AMBER; c.lineWidth = hair(2); polygon(c, 752, 246, 100 + a.low * 14, 6, Math.PI / 6); c.stroke();
   title(c, 'NERV', 653, 271, 64, BONE, .82);
   label(c, 'SIGNAL: LIVE', 752, 369, 15, GREEN, 'center');
   scope(c, f.audio, 590, 390, 323, 66, CYAN);
@@ -205,7 +255,7 @@ function radarInstrument(c: Context, f: NervSceneFrame, x: number, y: number, r:
     const theta = noise(i, f.seed) * TAU, rr = r * (.15 + noise(i + 20, f.seed) * .76);
     const px = x + Math.cos(theta) * rr, py = y + Math.sin(theta) * rr;
     const level = band(f.audio, i * 32, (i + 1) * 32);
-    c.fillStyle = i === 0 ? CYAN : color; c.fillRect(px - 2, py - 2, 3 + level * 5, 3 + level * 5);
+    c.fillStyle = i === 0 ? CYAN : color; rect(c, px - 2, py - 2, 3 + level * 5, 3 + level * 5);
   }
 }
 function radar(c: Context, f: NervSceneFrame, a: Signals): void {
@@ -246,9 +296,9 @@ const DIGITS: Readonly<Record<string, string>> = { '0': 'abcdef', '1': 'bc', '2'
 function digits(c: Context, value: string, x: number, y: number, h: number, color: string): void {
   let cursor = x; const w = h * .51, thick = h * .085;
   for (const character of value) {
-    if (character === ':') { c.fillStyle = color; c.fillRect(cursor, y + h * .3, thick, thick); c.fillRect(cursor, y + h * .7, thick, thick); cursor += thick * 3; continue; }
+    if (character === ':') { c.fillStyle = color; rect(c, cursor, y + h * .3, thick, thick); rect(c, cursor, y + h * .7, thick, thick); cursor += thick * 3; continue; }
     const segments = [[0, 0, w, thick], [w - thick, 0, thick, h / 2], [w - thick, h / 2, thick, h / 2], [0, h - thick, w, thick], [0, h / 2, thick, h / 2], [0, 0, thick, h / 2], [0, h / 2 - thick / 2, w, thick]];
-    segments.forEach(([xx, yy, ww, hh], i) => { c.fillStyle = (DIGITS[character] ?? '').includes('abcdefg'[i]!) ? color : '#221e18'; c.fillRect(cursor + xx!, y + yy!, ww!, hh!); });
+    segments.forEach(([xx, yy, ww, hh], i) => { c.fillStyle = (DIGITS[character] ?? '').includes('abcdefg'[i]!) ? color : '#221e18'; rect(c, cursor + xx!, y + yy!, ww!, hh!); });
     cursor += w + h * .15;
   }
 }
@@ -256,11 +306,12 @@ function battery(c: Context, f: NervSceneFrame, a: Signals): void {
   panel(c, 24, 85, 912, 386, 'INTERNAL POWER / FOUR-BAR CLOCK', AMBER);
   label(c, 'ACTIVITY LIMIT', 480, 151, 23, AMBER, 'center');
   const beatSeconds = 60 / f.bpm;
-  const remaining = Math.max(0, Math.ceil((1 - fract(a.beats / 16)) * 16 * beatSeconds));
+  // A scene interval counts down to its own end (whole seconds, exactly zero at the end); without one the plate keeps its 16-beat cycle.
+  const remaining = a.interval ? Math.max(0, Math.ceil(a.interval.remaining - 1e-9)) : Math.max(0, Math.ceil((1 - fract(a.beats / 16)) * 16 * beatSeconds));
   const clock = `${String(Math.floor(remaining / 60)).padStart(2, '0')}:${String(remaining % 60).padStart(2, '0')}`;
   digits(c, clock, 239, 179, 145, AMBER);
   label(c, 'FOUR-BAR CYCLE', 480, 353, 13, ORANGE, 'center');
-  meter(c, 139, 379, 682, 23, 1 - fract(a.beats / 16), AMBER, 48);
+  meter(c, 139, 379, 682, 23, a.interval ? 1 - a.interval.progress : 1 - fract(a.beats / 16), AMBER, 48);
   label(c, `SIGNAL LOAD ${Math.round(a.level * 100)}%`, 140, 443, 13, GREEN);
   label(c, 'EXTERNAL / DISCONNECTED', 820, 443, 13, RED, 'right');
 }
@@ -268,7 +319,7 @@ function atfield(c: Context, f: NervSceneFrame, a: Signals): void {
   hexField(c, 590, 283, 282, f.localTime, a.low, a.high, f.seed);
   for (let i = 0; i < 7; i++) {
     const radius = 44 + i * 29 + a.low * 16 + Math.sin(f.localTime * 1.5 - i * .6) * 6;
-    c.save(); c.globalAlpha = .75 - i * .07; c.strokeStyle = i % 2 ? AMBER : ORANGE; c.lineWidth = i === 2 ? 3 : 1;
+    c.save(); c.globalAlpha = .75 - i * .07; c.strokeStyle = i % 2 ? AMBER : ORANGE; c.lineWidth = hair(i === 2 ? 3 : 1);
     polygon(c, 593, 286, radius, 8, Math.PI / 8); c.stroke(); c.restore();
   }
   title(c, 'A.T.', 43, 191, 100, BONE); title(c, 'FIELD', 43, 263, 92, ORANGE);
@@ -293,10 +344,10 @@ function plug(c: Context, f: NervSceneFrame, a: Signals): void {
   ['A10 INTERFACE', 'PULSE MONITOR', 'HARMONICS', 'SIGNAL BUS'].forEach((v, i) => { label(c, `${v} / OK`, 44, 269 + i * 39, 12, i % 2 ? GREEN : ORANGE); });
   meter(c, 44, 437, 197, 12, a.mid, AMBER);
   const cx = 603 + Math.sin(f.localTime * .3) * 17, cy = 276;
-  c.save(); c.beginPath(); c.rect(284, 85, 652, 386); c.clip();
+  c.save(); clipRect(c, 284, 85, 652, 386);
   for (let i = 15; i >= 0; i--) {
     const depth = fract(i / 16 + f.localTime * .075), radius = 14 + depth * depth * 390;
-    c.strokeStyle = i % 4 ? ORANGE : AMBER; c.lineWidth = 1 + depth * a.low * 3;
+    c.strokeStyle = i % 4 ? ORANGE : AMBER; c.lineWidth = hair(1 + depth * a.low * 3);
     c.globalAlpha = .1 + depth * .55; polygon(c, cx, cy, radius, 8, Math.PI / 8); c.stroke();
   }
   c.restore(); brackets(c, cx - 32, cy - 32, 64, 64, GREEN);
@@ -321,10 +372,10 @@ function city(c: Context, f: NervSceneFrame, _a: Signals): void {
     const index = row * 18 + i, level = band(f.audio, Math.floor(index * 512 / 54), Math.floor((index + 1) * 512 / 54));
     const x = 52 + i * 48 + row * 6 + drift, y = baseY - (2 - row) * 37;
     const h = 16 + noise(index, f.seed) * 86 + level * 55, w = 23 + row * 3, d = 8;
-    c.fillStyle = '#08110f'; c.fillRect(x, y - h, w, h); c.strokeStyle = row === 2 ? ORANGE : '#886742'; c.lineWidth = 1; c.strokeRect(x, y - h, w, h);
+    c.fillStyle = '#08110f'; rect(c, x, y - h, w, h); outline(c, x, y - h, w, h, row === 2 ? ORANGE : '#886742');
     line(c, x, y - h, x + d, y - h - d, AMBER); line(c, x + d, y - h - d, x + w + d, y - h - d, AMBER);
     line(c, x + w, y - h, x + w + d, y - h - d, AMBER); line(c, x + w + d, y - h - d, x + w + d, y - d, '#886742'); line(c, x + w, y, x + w + d, y - d, '#886742');
-    if (level > .2) { c.fillStyle = CYAN; c.fillRect(x + 5, y - h + 7, 3, 4); }
+    if (level > .2) { c.fillStyle = CYAN; rect(c, x + 5, y - h + 7, 3, 4); }
   }
   const scanX = 35 + fract(f.localTime / 13) * 888; line(c, scanX, 195, scanX, 465, CYAN);
   label(c, 'GE0FRONT / 54 FREQUENCY DISTRICTS', 42, 465, 11, ORANGE);
@@ -340,7 +391,7 @@ function sync(c: Context, f: NervSceneFrame, a: Signals): void {
 function berserk(c: Context, f: NervSceneFrame, a: Signals): void {
   hexField(c, 722, 270, 208, f.localTime * 1.2, a.low, a.high, f.seed, PURPLE);
   for (let i = 0; i < 5; i++) {
-    c.strokeStyle = i % 2 ? PURPLE : LIME; c.lineWidth = 2;
+    c.strokeStyle = i % 2 ? PURPLE : LIME; c.lineWidth = hair(2);
     polygon(c, 724, 270, 55 + i * 32 + a.low * 13, 6, Math.PI / 6 + Math.sin(f.localTime * .16) * .1); c.stroke();
   }
   title(c, 'BERSERK', 40, 194, 93, LIME, .7); label(c, 'LIMITER / AUDIO OVERDRIVE', 45, 229, 15, PURPLE);
@@ -377,16 +428,19 @@ export function renderNervScene(c: Context, width: number, height: number, input
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return;
   const f: NervSceneFrame = { ...input, time: Math.max(0, finite(input.time)), localTime: Math.max(0, finite(input.localTime)), progress: clamp(input.progress), bpm: clamp(input.bpm, 20, 400), seed: input.seed >>> 0 };
   const low = band(f.audio, 0, 10), mid = band(f.audio, 10, 93), high = band(f.audio, 93, 512);
-  const beats = f.localTime * f.bpm / 60;
-  const a: Signals = { low, mid, high, level: (low + mid + high) / 3, beats, phase: fract(beats), bar: Math.floor(f.time * f.bpm / 240) };
+  const t = timingSignals(f.time, f.grid ?? null, f.sceneStart ?? null, f.sceneEnd ?? null, { bpm: f.bpm, localTime: f.localTime });
+  const a: Signals = { low, mid, high, level: (low + mid + high) / 3, beats: t.sceneBeat, phase: t.beatPhase, bar: t.bar, beatInBar: t.beatInBar, beatsPerBar: t.beatsPerBar, interval: t.interval, gridded: !!f.grid && compileClockGrid(f.grid) !== null };
   c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.globalAlpha = 1; c.globalCompositeOperation = 'source-over';
   c.shadowBlur = 0; c.lineCap = 'butt'; c.lineJoin = 'miter'; c.setLineDash([]); c.fillStyle = INK; c.fillRect(0, 0, width, height);
-  // Fit the complete instrument on every player aspect ratio. Narrow windows
+  // Unhinted, subpixel-positioned glyphs: a design scaled by an arbitrary factor must not snap stems or advances differently per size. Set inside save and restore, so
+  // the caller's context is untouched; a context without the property simply keeps an unused expando.
+  c.textRendering = 'geometricPrecision';
+  // Fit the complete instrument on every player aspect ratio: one uniform scale, integer letterbox offsets and a clip whose edges sit on device pixels. Narrow windows
   // receive letterboxing rather than cropped controls or overlapping labels.
-  const scale = Math.min(width / 960, height / 540);
-  c.translate((width - 960 * scale) / 2, (height - 540 * scale) / 2); c.scale(scale, scale);
-  c.beginPath(); c.rect(0, 0, 960, 540); c.clip();
-  const accent = f.scene === 'berserk' || f.scene === 'sync' ? PURPLE : f.scene === 'alert' || f.scene === 'seele' ? RED : ORANGE;
-  chrome(c, f, a, accent); (DRAW[f.scene] ?? boot)(c, f, a);
-  c.restore();
+  M = surfaceMetrics(width, height, NERV_DESIGN.width, NERV_DESIGN.height);
+  try {
+    applyDesignTransform(c, M);
+    const accent = f.scene === 'berserk' || f.scene === 'sync' ? PURPLE : f.scene === 'alert' || f.scene === 'seele' ? RED : ORANGE;
+    chrome(c, f, a, accent); (DRAW[f.scene] ?? boot)(c, f, a);
+  } finally { M = DEFAULT_METRICS; c.restore(); }
 }

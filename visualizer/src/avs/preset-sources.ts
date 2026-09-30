@@ -185,8 +185,9 @@ export const AVS_PRESET_SOURCES = new AvsPresetSourceRegistry([
     async list() {
       localCatalogCache = await fetchLocalAvsCatalog();
       // This registry feeds the legacy AVS editor/projector/offline executor.
-      // Mixed collections also contain NERV manifests, which use their own worker.
-      return localCatalogCache.filter((preset) => preset.kind !== 'nerv').map((preset) => ({
+      // Mixed collections also contain NERV and HUD manifests, which use their own workers,
+      // so only rows that are plainly AVS are admitted (an allow-list, never `!== 'nerv'`).
+      return localCatalogCache.filter((preset) => preset.kind === undefined || preset.kind === 'avs').map((preset) => ({
         id: preset.id, name: preset.name, fileName: preset.fileName,
         collection: 'Full local collection', sha256: preset.sha256,
         byteLength: preset.bytes, autoEligible: preset.autoEligible && !preset.notWorking,
@@ -196,7 +197,7 @@ export const AVS_PRESET_SOURCES = new AvsPresetSourceRegistry([
     async load(id) {
       const catalog = localCatalogCache ??= await fetchLocalAvsCatalog();
       const preset = catalog.find((candidate) => candidate.id === id);
-      if (!preset || preset.kind === 'nerv') throw new Error(`Unknown local AVS preset: ${id}`);
+      if (!preset || (preset.kind !== undefined && preset.kind !== 'avs')) throw new Error(`Unknown local AVS preset: ${id}`);
       return fetchLocalAvsPreset(preset);
     },
     invalidate() { localCatalogCache = null; },

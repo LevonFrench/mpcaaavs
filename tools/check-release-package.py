@@ -22,7 +22,10 @@ with tempfile.TemporaryDirectory(prefix='release-fixture-', dir=ROOT / '.tmp') a
     for relative in (
         'mpc-hc-aaavs.pdb', 'mpc-hc-aaavs.ini', 'mpc-hc-aaavs.history.ini',
         'AAAVS.WebView2/private-profile.txt', 'visualizer/avs presets/setups.json',
+        'visualizer/avs presets/folders.json', 'visualizer/avs presets/stats.json',
         'visualizer/avs presets/catalog/presets.json', 'visualizer/avs presets/presets/private.avs',
+        'visualizer/hud-presets/showcase/private.hud', 'visualizer/hud-presets.private/hud-titles.json',
+        'visualizer/avs presets/catalog/hud-titles.json',
         'MediaInfo.dll', 'D3DX9_43.dll',
     ):
         file = player / relative

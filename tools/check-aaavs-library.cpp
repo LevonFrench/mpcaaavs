@@ -58,5 +58,61 @@ int main() {
     assert(fs::last_write_time(nervTwo)==nervTime&&Read(nervTwo)==manifest);
     fs::remove(nervTwo);SetNotWorking(root,nervHash,false); // Missing presets remain recoverable in the manager.
     mixed.Parse(Read(catalog).c_str());assert(!mixed["presets"][1]["notWorking"].GetBool());
-    std::cout<<"Preset filesystem: AVS/NERV rating rename, timestamp and byte preservation, persistent status/undo, rating-status independence, atomic rollback, mixed catalog, invalid paths and unknown IDs PASS\n";
+    // HUD manifests share the rating rename and status paths; the extension is the only new admission rule.
+    assert(PresetPath(root,"presets/unique/Duel.hud").extension()==L".hud");
+    for(const auto& path:{"presets/unique/Duel.hud.exe","presets/unique/Duel.HUDX","presets/unique/Duel.huds"}){failed=false;try{PresetPath(root,path);}catch(...){failed=true;}assert(failed);}
+    const std::string hudHash(64,'d');const auto hudSource=root/L"presets/unique/HUD 01 - Duel.hud";
+    const std::string hudManifest="{\"format\":\"mpcaaavs-hud\",\"version\":1}";
+    {std::ofstream f(hudSource,std::ios::binary);f<<hudManifest;}fs::last_write_time(hudSource,old);
+    mixed.Parse(Read(catalog).c_str());auto& hudAllocator=mixed.GetAllocator();
+    rapidjson::Value hud(rapidjson::kObjectType);
+    hud.AddMember("sha256",rapidjson::Value(hudHash.c_str(),hudAllocator),hudAllocator);
+    hud.AddMember("canonical_path","presets/unique/HUD 01 - Duel.hud",hudAllocator);hud.AddMember("kind","hud",hudAllocator);
+    mixed["presets"].PushBack(hud,hudAllocator);AtomicWrite(catalog,Json(mixed));
+    Rate(root,hudHash,3);const auto hudRated=root/L"presets/unique/HUD 01 - Duel [3 stars].hud";
+    assert(!fs::exists(hudSource)&&fs::exists(hudRated));assert(Read(hudRated)==hudManifest);assert(fs::last_write_time(hudRated)>old);
+    SetNotWorking(root,hudHash,true);mixed.Parse(Read(catalog).c_str());
+    assert(mixed["presets"].Size()==3&&std::string(mixed["presets"][2]["kind"].GetString())=="hud"&&mixed["presets"][2]["notWorking"].GetBool()&&mixed["presets"][2]["rating"].GetInt()==3);
+    // Private page state: whitelisted names, atomic writes, bounded size and well-formed JSON.
+    auto parse=[](const std::string& text){rapidjson::Document doc;doc.Parse(text.c_str());assert(!doc.HasParseError());return doc;};
+    auto missing=parse(LoadState(root,"folders"));
+    assert(std::string(missing["type"].GetString())=="state-loaded"&&std::string(missing["name"].GetString())=="folders"&&missing["data"].IsNull());
+    const std::string folders="{\"version\":1,\"rev\":1,\"folders\":[{\"id\":\"f1\",\"name\":\"Sunset \xC2\xB7 mix\",\"parent\":null,\"kind\":\"manual\",\"presets\":[\""+hash+"\"]}]}";
+    auto folderData=parse(folders);
+    auto saved=parse(SaveState(root,"folders",folderData));
+    assert(std::string(saved["type"].GetString())=="state-saved"&&std::string(saved["name"].GetString())=="folders");
+    assert(fs::exists(root/L"folders.json")&&!fs::exists(root/L"folders.json.writing"));
+    auto loaded=parse(LoadState(root,"folders"));
+    assert(loaded["data"].IsObject()&&loaded["data"]["version"].GetInt()==1&&std::string(loaded["data"]["folders"][0]["name"].GetString())=="Sunset \xC2\xB7 mix");
+    assert(Read(root/L"folders.json")==Json(folderData));
+    auto stats=parse("{\"version\":1,\"plays\":{}}");SaveState(root,"stats",stats);assert(fs::exists(root/L"stats.json"));
+    assert(parse(LoadState(root,"stats"))["data"]["plays"].IsObject());
+    for(const auto& bad:{"setups","catalog/presets","..\\folders","folders.json","Folders",""}){
+        failed=false;try{LoadState(root,bad);}catch(...){failed=true;}assert(failed);
+        failed=false;try{SaveState(root,bad,folderData);}catch(...){failed=true;}assert(failed);
+    }
+    assert(!fs::exists(root/L"setups.json"));
+    for(const auto& text:{"[]","{}","{\"version\":0}","{\"version\":\"1\"}","{\"version\":1.5}","42"}){
+        rapidjson::Document bad;bad.Parse(text);failed=false;try{SaveState(root,"folders",bad);}catch(...){failed=true;}assert(failed);
+    }
+    assert(Read(root/L"folders.json")==Json(folderData)); // rejected writes never touch the saved file
+    rapidjson::Document big;big.SetObject();{auto& a=big.GetAllocator();big.AddMember("version",1,a);
+        rapidjson::Value list(rapidjson::kArrayType);for(int i=0;i<60000;++i)list.PushBack(rapidjson::Value(hash.c_str(),a),a);big.AddMember("members",list,a);}
+    assert(Json(big).size()>kStateMaxBytes);failed=false;try{SaveState(root,"folders",big);}catch(...){failed=true;}assert(failed);
+    assert(Read(root/L"folders.json")==Json(folderData));
+    {std::ofstream f(root/L"stats.json",std::ios::binary|std::ios::trunc);f<<"{\"version\":1,";}   // corrupt on disk: reported, never silently reset
+    failed=false;try{LoadState(root,"stats");}catch(...){failed=true;}assert(failed);
+    {std::ofstream f(root/L"stats.json",std::ios::binary|std::ios::trunc);f<<"[1,2]";}
+    failed=false;try{LoadState(root,"stats");}catch(...){failed=true;}assert(failed);
+    {std::ofstream f(root/L"stats.json",std::ios::binary|std::ios::trunc);f<<std::string(kStateMaxBytes+1,' ');}
+    failed=false;try{LoadState(root,"stats");}catch(...){failed=true;}assert(failed);
+    // A leftover transaction file makes the write fail without damaging the previous state.
+    {std::ofstream f(root/L"folders.json.writing");f<<"occupied";}
+    failed=false;try{SaveState(root,"folders",stats);}catch(...){failed=true;}assert(failed);
+    assert(Read(root/L"folders.json")==Json(folderData));fs::remove(root/L"folders.json.writing");
+    // Deeply nested input is refused before the recursive writer can see it.
+    assert(DepthOk("{\"a\":[[1],{\"b\":\"[[[[\"}]}")&&!DepthOk(std::string(200,'[')+std::string(200,']'))&&DepthOk("\"\\\"[[[[[[\""));
+    {std::ofstream f(root/L"stats.json",std::ios::binary|std::ios::trunc);f<<"{\"version\":1,\"x\":"<<std::string(200,'[')<<std::string(200,']')<<"}";}
+    failed=false;try{LoadState(root,"stats");}catch(...){failed=true;}assert(failed);
+    std::cout<<"Preset filesystem: AVS/NERV/HUD rating rename, timestamp and byte preservation, persistent status/undo, rating-status independence, atomic rollback, mixed catalog, invalid paths and unknown IDs; private state load/save: whitelist, size, corruption, atomic failure and nesting PASS\n";
 }

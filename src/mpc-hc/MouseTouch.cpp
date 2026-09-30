@@ -227,6 +227,10 @@ WORD CMouse::AssignedMouseToCmd(UINT mouseValue, UINT nFlags) {
 
 bool CMouse::OnButton(UINT id, const CPoint& point, int nFlags)
 {
+    // A requested management panel owns this area, including while it loads
+    // or recovers. Never turn a click on its fallback into a playback command.
+    if (GetWnd().GetSafeHwnd() == m_pMainFrame->m_wndView.GetSafeHwnd() &&
+            m_pMainFrame->m_wndView.m_aaavs.PanelOpen()) return true;
     bool ret = false;
     WORD cmd = AssignedMouseToCmd(id, nFlags);
     if (cmd) {

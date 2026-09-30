@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>aaavs — projector</title>
+<style>
+  /* Deliberately almost empty. Everything the control window has — HUD, hint
+     bar, guide, panels — is absent here rather than hidden, because a hidden
+     element is one keystroke away from being on the projector. */
+  html, body { margin:0; height:100%; background:#000; overflow:hidden;
+    color:#e9e9f2; font:12px/1.5 ui-monospace,"Cascadia Mono",Menlo,Consolas,monospace; }
+  #stage { display:block; width:100vw; height:100vh; }
+
+  /* The only chrome: a line that says why the screen is black. It sits in the
+     corner rather than the centre so it is not the thing a projector frames,
+     and it goes away for good on the first rendered frame. */
+  #status {
+    position:fixed; left:1rem; bottom:1rem; padding:.45rem .75rem;
+    border:1px solid rgba(255,255,255,.14); border-radius:999px;
+    background:rgba(10,10,18,.7); color:#8a8aa0; white-space:nowrap;
+    pointer-events:none;
+  }
+  #status[hidden] { display:none; }
+
+  #err {
+    position:fixed; inset:0; display:grid; place-items:center; padding:2rem;
+    background:#04040a; text-align:center; line-height:1.7;
+  }
+  #err[hidden] { display:none; }
+</style>
+</head>
+<body>
+  <canvas id="stage"></canvas>
+  <div id="status">waiting for the aaavs control window…</div>
+  <div id="err" hidden></div>
+  <script type="module" src="dist/projector-window.js"></script>
+</body>
+</html>

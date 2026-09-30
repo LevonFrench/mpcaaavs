@@ -6,14 +6,14 @@ const scenes=['boot','magi','psycho','radar','harmonics','seele','battery','atfi
 const catalog=scenes.map((scene,i)=>({kind:'nerv',scene,name:`NERV ${scene}`,sha256:i.toString(16).padStart(64,'0'),autoEligible:true}));
 const result=await build({entryPoints:['src/mpc-host.ts'],bundle:true,format:'esm',write:false,define:{'import.meta.url':'"https://aaavs.invalid/dist/mpc-host.js"'},plugins:[{name:'fixture',setup(b){
  b.onResolve({filter:/(local-collection|mpc-management|mpc-bitmap-dependencies)\.ts$/},args=>({path:args.path,namespace:'fixture'}));
- b.onLoad({filter:/.*/,namespace:'fixture'},args=>({contents:args.path.includes('local-collection')?`export async function fetchLocalAvsCatalog(){return globalThis.catalog;} export function fetchLocalAvsPreset(p){return globalThis.fetchPreset(p);}`:args.path.includes('management')?`export class PresetManagement {open=false; constructor(a){globalThis.actions=a;} refresh(){} show(){} receive(){}}`:`export async function loadPresetBitmaps(){throw Error('NERV must not fetch historical bitmap packages');}`}));
+ b.onLoad({filter:/.*/,namespace:'fixture'},args=>({contents:args.path.includes('local-collection')?`export async function fetchLocalAvsCatalog(){return globalThis.catalog;} export function fetchLocalAvsPreset(p){return globalThis.fetchPreset(p);} export function isSceneKind(p){return p?.kind==='nerv'||p?.kind==='hud'} export async function fetchLocalAvsSources(){return new Map()}`:args.path.includes('management')?`export class PresetManagement {open=false; constructor(a){globalThis.actions=a;} refresh(){} show(){} receive(){}}`:`export async function loadPresetBitmaps(){throw Error('NERV must not fetch historical bitmap packages');}`}));
 }}]});
 const nodes=new Map(),posted=[],workers=[],fetches=[];
 let now=0,listener,raf,pagehide,draws=0;
-const ctx={globalAlpha:1,drawImage(){draws++;},getImageData(){return {data:new Uint8ClampedArray(256*144*4)};},save(){},restore(){},beginPath(){},rect(){},clip(){},fillRect(){},createPattern(){return {};}};
+const ctx={clearRect(){},setTransform(){},globalAlpha:1,drawImage(){draws++;},getImageData(){return {data:new Uint8ClampedArray(256*144*4)};},save(){},restore(){},beginPath(){},rect(){},clip(){},fillRect(){},createPattern(){return {};}};
 const canvas=()=>({width:640,height:360,clientWidth:640,clientHeight:360,getContext(){return {...ctx,canvas:this};}});
 globalThis.catalog=catalog;
-globalThis.fetchPreset=p=>new Promise(resolve=>fetches.push({p,resolve:()=>resolve(new Uint8Array(4))}));
+globalThis.fetch=async()=>{throw Error('offline fixture')};globalThis.fetchPreset=p=>new Promise(resolve=>fetches.push({p,resolve:()=>resolve(new Uint8Array(4))}));
 globalThis.OffscreenCanvas=class {constructor(){Object.assign(this,canvas());}};
 globalThis.document={hidden:false,baseURI:'https://aaavs.invalid/mpc.html',body:{append(){},classList:{add(){},remove(){}}},createElement:canvas,querySelector(id){if(!nodes.has(id))nodes.set(id,id==='#visualizer'?canvas():{textContent:''});return nodes.get(id);},addEventListener(){}};
 globalThis.window={chrome:{webview:{postMessage(m){posted.push(m);},addEventListener(_,fn){listener=fn;}}},setTimeout(){return 1;},addEventListener(t,fn){if(t==='pagehide')pagehide=fn;}};
@@ -85,6 +85,8 @@ msg({type:'settings',enabled:true,shuffle:false,transition:15,beats:1,keepOld:fa
 msg({type:'settings',enabled:true,shuffle:false,transition:1,beats:1,keepOld:false});tick();assert.equal(lastRender(active).nerv.previousLocalTime,2);active.send('frame');
 // Existing transition style/duration controls feed the absolute clock, including Random.
 for(const mode of [0,2,6,10,14]){msg({type:'settings',enabled:true,shuffle:false,transition:mode,beats:4});tick();assert.equal(lastRender(active).nerv.transitionMode,mode);assert.equal(lastRender(active).nerv.blend,.125,'four beats uses full scene duration, not quarter-scene cap');active.send('frame');}
+// Range flag day (contract C-02): every stored index 0..32 reaches the worker; anything else falls back to Cross dissolve.
+for(const [mode,expected] of [[16,16],[31,31],[32,32],[33,1],[-1,1],[1.5,1]]){msg({type:'settings',enabled:true,shuffle:false,transition:mode,beats:4});tick();assert.equal(lastRender(active).nerv.transitionMode,expected,`settings transition ${mode}`);active.send('frame');}
 // Clock change back to displayed A invalidates pending B (without a media seek).
 audio(22.1);await flush();const wrong=fetches.at(-1);const currentCount=workers.length;
 const reordered=structuredClone(setup);[reordered.presets[10],reordered.presets[11]]=[reordered.presets[11],reordered.presets[10]];

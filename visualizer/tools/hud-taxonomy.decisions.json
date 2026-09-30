@@ -1,0 +1,7 @@
+{
+  "format": "aaavs-hud-taxonomy-decisions",
+  "version": 1,
+  "unknownRole": "label",
+  "unknownDriver": "seed.0",
+  "policy": "Unrecognised descriptions use original generic labels and a declared seeded fallback; they never become public text."
+}

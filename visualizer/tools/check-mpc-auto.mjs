@@ -43,18 +43,24 @@ assert.ok(quiet.tempo.locked && Math.abs(quiet.tempo.bpm-120)<3, 'quiet pulse mu
 assert.equal(music.update(41,false,silence).switch,false);
 assert.equal(music.update(0,true,silence).switch,false,'seek rearms');
 const calls=[];
-const context = { globalAlpha:1, imageSmoothingEnabled:false, drawImage(...a){calls.push(a);},save(){},restore(){},beginPath(){},rect(...a){assert.ok(a.every(Number.isFinite));},clip(){},fillRect(){},createPattern(){return {};}};
+// Fake 2D context with the path and text surface the new styles use (moveTo/lineTo/arc/fill/stroke/strokeText/fillText); every numeric argument must be finite.
+const finite=(...a)=>assert.ok(a.every(v=>typeof v!=='number'||Number.isFinite(v)),'finite canvas arguments');
+const context = { globalAlpha:1, imageSmoothingEnabled:false, imageSmoothingQuality:'low', globalCompositeOperation:'source-over', fillStyle:'', strokeStyle:'', lineWidth:1, lineJoin:'miter', font:'', textAlign:'start', textBaseline:'alphabetic',
+ drawImage(...a){finite(...a.slice(1));calls.push(a);},save(){},restore(){},beginPath(){},closePath(){},rect:finite,clip(){},fillRect:finite,clearRect:finite,createPattern(){return {};},
+ moveTo:finite,lineTo:finite,arc:finite,fill(){},stroke(){},fillText:(text,...a)=>{assert.equal(typeof text,'string');finite(...a);},strokeText:(text,...a)=>{assert.equal(typeof text,'string');finite(...a);},setTransform:finite};
 globalThis.document={createElement(){return {width:0,height:0,getContext(){return context;}};}};
-const { AvsTransition, transitionProgress, blockOrder, TRANSITIONS } = await load('src/mpc-transition.ts');
-assert.equal(TRANSITIONS.length,16);
+const { AvsTransition, transitionProgress, blockOrder, TRANSITIONS, TRANSITION_META, TRANSITION_COUNT, TRANSITION_CUT, transitionUnit } = await load('src/mpc-transition.ts');
+assert.equal(TRANSITIONS.length,TRANSITION_COUNT); assert.equal(TRANSITION_COUNT,33); assert.equal(TRANSITION_META.length,TRANSITION_COUNT);
+assert.equal(TRANSITION_CUT,15); assert.equal(TRANSITIONS[TRANSITION_CUT],'Cut');
 assert.equal(new Set(blockOrder()).size,9);
 assert.equal(transitionProgress(0),0); assert.equal(transitionProgress(1),1);
 assert.ok(Math.abs(transitionProgress(.5)-.5)<1e-9);
 const old={},next={};
-for(let mode=1;mode<=15;mode++) {
+for(let mode=1;mode<TRANSITION_COUNT;mode++) {
  const tr=new AvsTransition(mode);
- for(const t of [0,.2,.5,.9,1]) { calls.length=0; tr.draw(context,old,next,t,641,359); assert.ok(calls.length); if(t===1) assert.equal(calls.at(-1)[0],next); }
+ for(const t of [0,.2,.5,.9,1]) { calls.length=0; tr.draw(context,old,next,t,641,359); assert.ok(calls.length,`style ${mode} draws at t=${t}`); if(t===1) assert.equal(calls.at(-1)[0],next); }
 }
-const { checkTransitionRaster } = await import('./mpc-transition-raster-check.mjs');
+const { checkTransitionRaster, checkTransitionScaling } = await import('./mpc-transition-raster-check.mjs');
 checkTransitionRaster(AvsTransition);
-console.log(`Auto: fixed/adaptive phrases, silence, pause, seek, 120 BPM lock (${switches} switches) PASS; AVS: CPU raster geometry modes 1–13, all-mode draw-call/endpoints smoke PASS (browser raster acceptance pending)`);
+checkTransitionScaling(AvsTransition,transitionUnit);
+console.log(`Auto: fixed/adaptive phrases, silence, pause, seek, 120 BPM lock (${switches} switches) PASS; AVS: CPU raster geometry modes 1–13, resolution unit/smoothing/scratch-surface cases, all-style (1–${TRANSITION_COUNT-1}) draw-call/endpoints smoke PASS (browser raster acceptance pending)`);

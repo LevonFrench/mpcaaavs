@@ -1,3 +1,5 @@
+import { AUDIO_DURATION_MAX, BEATS_FROM_FADE, FADE_FROM_BEATS } from './mpc-contract.ts';
+import { loadPrefs, parseDisplayPrefs, prefsToWire, savePrefs, type DisplayPrefs } from './mpc-display.ts';
 import { defaultSettings, type SetupSettings } from './mpc-setups.ts';
 import { TRANSITIONS } from './mpc-transition.ts';
 
@@ -40,13 +42,20 @@ export class PlayerPcmQueue {
   }
 }
 
+/** Keys the library server persists (contract 2.3.6). Display preferences are device-local and never among them. */
+const SETTINGS_KEYS=['enabled','bars','shuffle','minimumRating','transition','beats','durationMs','keepOld','manualFade','autoFade'] as const;
+const FADE_KEYS=['fadeTiming','fadeRandomSet','fadeAnchor','queueQuantize'] as const;
+const DISPLAY_KEYS=['quality','avsResolution','pixelArt','showFps','timingOverlay'] as const;
+const isRecord=(value:unknown):value is Record<string,unknown>=>!!value&&typeof value==='object'&&!Array.isArray(value);
+function storedPrefs():DisplayPrefs { try{return loadPrefs();}catch{return parseDisplayPrefs({});} }
+
 interface BridgeActions {
   library(value:Message):Promise<Message>;
   playPause():void;
   fullscreen():void;
   options():void;
   notice(text:string):void;
-  settings(value:SetupSettings):void;
+  settings(value:SetupSettings,prefs:DisplayPrefs):void;
 }
 /** Native protocol adapter; the visualizer and all preset rules remain in mpc-host. */
 export class StandaloneBridge {
@@ -55,22 +64,45 @@ export class StandaloneBridge {
   ready=false;
   panel=0;
   settings:SetupSettings={...defaultSettings};
+  /** Device-local display preferences (contract C-14); persisted by the Player, sent to the page as wire integers. */
+  prefs:DisplayPrefs=storedPrefs();
   constructor(private actions:BridgeActions) {}
   addEventListener(type:'message',listener:(event:MessageEvent)=>void):void { if(type==='message')this.listeners.add(listener); }
   emit(data:Message):void {
     if(data.type==='settings'){
-      this.settings={...this.settings,...data} as SetupSettings;
-      this.actions.settings(this.settings);
+      // The fade fields are a full-state snapshot (absent means default); the legacy ten merge as before.
+      const next:Record<string,unknown>={...this.settings};
+      for(const key of FADE_KEYS)delete next[key];
+      for(const key of [...SETTINGS_KEYS,...FADE_KEYS])if(data[key]!==undefined)next[key]=data[key];
+      this.settings=next as unknown as SetupSettings;
+      if(DISPLAY_KEYS.some(key=>data[key]!==undefined))this.prefs=parseDisplayPrefs(data,this.prefs);
+      this.actions.settings(this.settings,this.prefs);
     }
     for(const listener of this.listeners)listener(new MessageEvent('message',{data}));
   }
-  configure(patch:Partial<SetupSettings>):void { this.library(()=>({op:'configure',settings:{...this.settings,...patch}})); }
-  toggle(key:'shuffle'|'enabled'):void {this.library(()=>({op:'configure',settings:{...this.settings,[key]:!this.settings[key]}}));}
+  /** Library `configure` payload: settings only, with `fadeTiming` authoritative and `beats` always its legacy projection (C-03). */
+  private payload(patch:Partial<SetupSettings>):Message {
+    const merged:Record<string,unknown>={...this.settings,...patch};
+    if(typeof patch.fadeTiming==='number')merged.beats=BEATS_FROM_FADE[patch.fadeTiming]??0;
+    else if(typeof patch.beats==='number')merged.fadeTiming=FADE_FROM_BEATS[patch.beats]??0;
+    const out:Record<string,unknown>={};
+    for(const key of [...SETTINGS_KEYS,...FADE_KEYS])if(merged[key]!==undefined)out[key]=merged[key];
+    return out;
+  }
+  configure(patch:Partial<SetupSettings>):void { this.library(()=>({op:'configure',settings:this.payload(patch)})); }
+  toggle(key:'shuffle'|'enabled'):void {this.library(()=>({op:'configure',settings:this.payload({[key]:!this.settings[key]})}));}
+  /** Apply a page-to-host `display:` patch as native does: clamp, persist, and re-send the settings snapshot. */
+  private display(value:unknown):void {
+    if(!isRecord(value))return;
+    this.prefs=parseDisplayPrefs(value,this.prefs);
+    try{savePrefs(this.prefs);}catch{/* storage may be unavailable; the choice still applies for this session */}
+    this.emit({type:'settings',...this.settings,...prefsToWire(this.prefs)});
+  }
   private library(value:Message|(()=>Message)):void {
     this.requests=this.requests.then(async()=>{
       const request=typeof value==='function'?value():value;
-      try{const response=await this.actions.library(request);this.emit(response);if(response.type==='library-error'){this.actions.notice(String(response.message));this.actions.settings(this.settings);}}
-      catch(error){this.emit({type:'library-error',operation:request.op,message:String(error)});this.actions.notice(String(error));this.actions.settings(this.settings);}
+      try{const response=await this.actions.library(request);this.emit(response.type==='settings'?{...response,...prefsToWire(this.prefs)}:response);if(response.type==='library-error'){this.actions.notice(String(response.message));this.actions.settings(this.settings,this.prefs);}}
+      catch(error){this.emit({type:'library-error',operation:request.op,message:String(error)});this.actions.notice(String(error));this.actions.settings(this.settings,this.prefs);}
     });
   }
   postMessage(message:string):void {
@@ -79,11 +111,22 @@ export class StandaloneBridge {
       catch(error){this.actions.notice(String(error));}return;
     }
     if(message.startsWith('panel-state:')){this.panel=Number(message.slice(12))||0;return;}
+    if(message.startsWith('display:')){
+      if(message.length>512)return;
+      try{this.display(JSON.parse(message.slice(8)));}catch{/* malformed patches are ignored, as native ignores them */}
+      return;
+    }
     switch(message){
-      case 'host-ready':this.ready=true;this.library({op:'load-settings'});break;
+      case 'host-ready':{
+        const firstReady=!this.ready;this.ready=true;
+        // Toolbar requests can precede the shared host's listener during the dynamic import.
+        if(firstReady&&(this.panel===1||this.panel===2))this.emit({type:'panel',panel:this.panel});
+        this.library({op:'load-settings'});break;
+      }
       case 'show-manager':this.panel=this.panel===1?0:1;this.emit({type:'panel',panel:this.panel});break;
       case 'show-setups':this.panel=this.panel===2?0:2;this.emit({type:'panel',panel:this.panel});break;
       case 'panel-close':this.panel=0;break;
+      case 'play-folder':this.emit({type:'play-folder'});break;
       case 'rate-up':this.emit({type:'rate',delta:1});break;
       case 'rate-down':this.emit({type:'rate',delta:-1});break;
       case 'mark-not-working':this.emit({type:'not-working'});break;
@@ -104,7 +147,9 @@ export async function startStandalonePlayer():Promise<void> {
   const queue=new PlayerPcmQueue();
   let context:AudioContext|null=null, node:AudioWorkletNode|null=null, gain:GainNode|null=null;
   let graph:Promise<void>|null=null, objectUrl:string|null=null, epoch=0, active=false, disposed=false, ticker=0, playIntent=0;
-  const settingsFields=['enabled','bars','shuffle','minimumRating','transition','beats','durationMs','keepOld','manualFade','autoFade'] as const;
+  const optional=<T extends HTMLElement>(id:string)=>document.getElementById(id) as T|null;
+  const settingsFields=['enabled','bars','shuffle','minimumRating','transition','durationMs','keepOld','manualFade','autoFade','fadeTiming','fadeAnchor','queueQuantize'] as const;
+  const displayFields=DISPLAY_KEYS;
   const notice=(text:string)=>{note.textContent=text;};
   const fullscreen=async()=>{try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen();}catch(error){notice(String(error));}};
   const bridge=new StandaloneBridge({
@@ -116,9 +161,16 @@ export async function startStandalonePlayer():Promise<void> {
       return result as Message;
     },
     playPause:()=>void togglePlayback(),fullscreen:()=>void fullscreen(),options:()=>{if(!options.open)options.showModal();},notice,
-    settings(value){
-      for(const key of settingsFields){const input=element<HTMLInputElement|HTMLSelectElement>(`setting-${key}`);if(!input)continue;
-        if(input instanceof HTMLInputElement&&input.type==='checkbox')input.checked=value[key]===true;else input.value=String(value[key]);}
+    settings(value,prefs){
+      const fadeTiming=Number.isInteger(value.fadeTiming)?value.fadeTiming!:(FADE_FROM_BEATS[value.beats]??0);
+      const shown:Record<string,unknown>={...value,fadeTiming,fadeAnchor:value.fadeAnchor??0,queueQuantize:value.queueQuantize??0};
+      for(const key of settingsFields){const input=optional<HTMLInputElement|HTMLSelectElement>(`setting-${key}`);if(!input)continue;
+        if(input instanceof HTMLInputElement&&input.type==='checkbox')input.checked=shown[key]===true;else input.value=String(shown[key]);}
+      // Random timing mask: one checkbox per concrete duration, meaningful only while Random is selected.
+      const mask=Number.isInteger(value.fadeRandomSet)?value.fadeRandomSet!:31;
+      for(let bit=0;bit<5;bit++){const box=optional<HTMLInputElement>(`setting-fadeSet${bit}`);if(!box)continue;box.checked=((mask>>bit)&1)===1;box.disabled=fadeTiming!==6;}
+      const wire:Record<string,number>=prefsToWire(prefs);
+      for(const key of displayFields){const input=optional<HTMLSelectElement>(`setting-${key}`);if(input)input.value=String(wire[key]);}
       element<HTMLButtonElement>('player-shuffle').setAttribute('aria-pressed',String(value.shuffle));
       element<HTMLButtonElement>('player-auto').setAttribute('aria-pressed',String(value.enabled));
     },
@@ -177,6 +229,7 @@ export async function startStandalonePlayer():Promise<void> {
   element('player-next').addEventListener('click',()=>bridge.emit({type:'next'}));
   element('player-shuffle').addEventListener('click',()=>bridge.toggle('shuffle'));
   element('player-auto').addEventListener('click',()=>bridge.toggle('enabled'));
+  optional('player-play-folder')?.addEventListener('click',()=>bridge.postMessage('play-folder'));
   element('player-manager').addEventListener('click',()=>bridge.postMessage('show-manager'));
   element('player-setups').addEventListener('click',()=>bridge.postMessage('show-setups'));
   element('player-options-button').addEventListener('click',()=>bridge.postMessage('options'));
@@ -184,10 +237,22 @@ export async function startStandalonePlayer():Promise<void> {
   element('player-options-close').addEventListener('click',()=>options.close());
   const transition=element<HTMLSelectElement>('setting-transition');
   TRANSITIONS.forEach((label,index)=>{const item=document.createElement('option');item.value=String(index);item.textContent=label;transition.append(item);});
-  for(const key of settingsFields)element(`setting-${key}`).addEventListener('change',()=>{
-    const input=element<HTMLInputElement|HTMLSelectElement>(`setting-${key}`);
+  for(const key of settingsFields)optional<HTMLInputElement|HTMLSelectElement>(`setting-${key}`)?.addEventListener('change',()=>{
+    const input=optional<HTMLInputElement|HTMLSelectElement>(`setting-${key}`)!;
     const value=input instanceof HTMLInputElement&&input.type==='checkbox'?input.checked:Number(input.value);
     bridge.configure({[key]:value});
+  });
+  // The Random mask has dedicated binding: bit i is `setting-fadeSet<i>`, and the last set bit can never be cleared.
+  for(let bit=0;bit<5;bit++)optional<HTMLInputElement>(`setting-fadeSet${bit}`)?.addEventListener('change',()=>{
+    let mask=0;const known=bridge.settings.fadeRandomSet??31;
+    for(let i=0;i<5;i++){const box=optional<HTMLInputElement>(`setting-fadeSet${i}`);if(box?box.checked:(known>>i)&1)mask|=1<<i;}
+    if(!mask){mask=1<<bit;optional<HTMLInputElement>(`setting-fadeSet${bit}`)!.checked=true;}
+    bridge.configure({fadeRandomSet:mask});
+  });
+  // Display preferences take the same path as native: a `display:` string that the bridge persists and echoes.
+  for(const key of displayFields)optional<HTMLSelectElement>(`setting-${key}`)?.addEventListener('change',()=>{
+    const value=Number(optional<HTMLSelectElement>(`setting-${key}`)!.value);
+    if(Number.isInteger(value))bridge.postMessage(`display:${JSON.stringify({[key]:value})}`);
   });
   // Keep typing/space in forms local; the shared host owns the documented F keys.
   document.addEventListener('keydown',event=>{const target=event.target as HTMLElement|null;
@@ -198,7 +263,10 @@ export async function startStandalonePlayer():Promise<void> {
     if(disposed)return;
     const position=Number.isFinite(audio.currentTime)?audio.currentTime:0;
     seek.value=String(position);clock.textContent=`${time(position)} / ${time(audio.duration)}`;
-    if(bridge.ready){const batch=queue.take(position);bridge.emit({type:'audio',playing:active&&!audio.paused&&!audio.seeking,visible:!document.hidden,position,epoch,...batch});}
+    if(bridge.ready){
+      const batch=queue.take(position),duration=Number.isFinite(audio.duration)&&audio.duration>0&&audio.duration<=AUDIO_DURATION_MAX?audio.duration:null;
+      bridge.emit({type:'audio',playing:active&&!audio.paused&&!audio.seeking,visible:!document.hidden,position,epoch,...(duration===null?{}:{duration}),...batch});
+    }
   }
   ticker=window.setInterval(tick,33);
   document.addEventListener('visibilitychange',()=>{reset(!document.hidden&&!audio.paused&&!audio.seeking);tick();});
@@ -206,7 +274,7 @@ export async function startStandalonePlayer():Promise<void> {
     disposed=true;playIntent++;window.clearInterval(ticker);audio.pause();reset(false);node?.disconnect();gain?.disconnect();
     if(context)void context.close();if(objectUrl)URL.revokeObjectURL(objectUrl);audio.removeAttribute('src');audio.load();
   },{once:true});
-  bridge.emit({type:'settings',...defaultSettings});
+  bridge.emit({type:'settings',...defaultSettings,...prefsToWire(bridge.prefs)});
   try{await import('./mpc-host.ts');}catch(error){notice(`Visualizer startup failed: ${String(error)}`);}
 }
 

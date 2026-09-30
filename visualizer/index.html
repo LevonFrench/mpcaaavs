@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>aaavs — layered beat-driven visualiser</title>
+<style>
+  :root { --fg:#e9e9f2; --dim:#8a8aa0; --line:rgba(255,255,255,.12); --accent:#ff3d81; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; background:#04040a; color:var(--fg); overflow:hidden;
+    font:12px/1.5 ui-monospace,"Cascadia Mono",Menlo,Consolas,monospace; }
+  #stage { display:block; width:100vw; height:100vh; }
+
+  #hud {
+    position:fixed; top:1rem; left:1rem; padding:.6rem .8rem;
+    border:1px solid var(--line); border-radius:8px;
+    background:rgba(10,10,18,.72); backdrop-filter:blur(10px);
+    color:var(--dim); pointer-events:none; white-space:nowrap;
+  }
+  #hud b { color:var(--fg); font-weight:600; }
+  #hud[hidden] { display:none; }
+
+  #hint {
+    position:fixed; left:50%; bottom:1.5rem; transform:translateX(-50%);
+    padding:.5rem .9rem; border:1px solid var(--line); border-radius:999px;
+    background:rgba(10,10,18,.72); color:var(--dim); white-space:nowrap;
+  }
+  #hint[hidden] { display:none; }
+  kbd { padding:.05em .35em; border:1px solid var(--line); border-radius:3px; color:var(--fg); }
+
+  #err {
+    position:fixed; inset:0; display:grid; place-items:center; padding:2rem;
+    background:#04040a; color:var(--fg); text-align:center; line-height:1.7;
+    max-width:40rem; margin:0 auto;
+  }
+  #err[hidden] { display:none; }
+
+  /* --- first-run guide. Shown once per browser; ? reopens it. --- */
+  #guideWrap { position:fixed; inset:0; z-index:30; display:grid; place-items:center;
+    padding:1rem; background:rgba(3,3,8,.78); backdrop-filter:blur(6px); }
+  #guideWrap[hidden] { display:none; }
+  #guide { width:min(40rem,100%); max-height:calc(100vh - 2rem); overflow-y:auto;
+    padding:1.25rem 1.4rem 1.4rem; border:1px solid var(--line); border-radius:12px;
+    background:rgba(10,10,18,.94); }
+  #guide header { display:flex; align-items:center; justify-content:space-between; margin-bottom:.5rem; }
+  #guide h2 { margin:0; font-size:14px; font-weight:600; letter-spacing:.18em; text-transform:uppercase; }
+  #guide .lead { margin:0 0 1.1rem; color:var(--dim); }
+  #guide .warn { margin:0 0 1.1rem; padding:.6rem .75rem; border:1px solid rgba(255,61,129,.55);
+    border-radius:8px; color:var(--fg); background:rgba(255,61,129,.08); }
+  #guide h3 { margin:1.3rem 0 .5rem; padding-bottom:.3rem; border-bottom:1px solid var(--line);
+    font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--accent); }
+  #guide table { width:100%; border-collapse:collapse; color:var(--dim); }
+  #guide td { padding:.22rem 0; vertical-align:baseline; }
+  #guide td:first-child { width:8.5rem; white-space:nowrap; }
+  #guide b { color:var(--fg); }
+  #guide button.go { margin-top:1.3rem; width:100%; padding:.55rem; border:1px solid var(--accent);
+    border-radius:6px; background:var(--accent); color:#0b0b14; font:inherit; font-weight:600;
+    letter-spacing:.08em; cursor:pointer; }
+  #guide button.x { padding:0 .45rem; border:1px solid transparent; border-radius:6px;
+    background:none; color:var(--dim); font:inherit; cursor:pointer; }
+  #guide button.x:hover { color:var(--fg); border-color:var(--line); }
+</style>
+</head>
+<body>
+  <canvas id="stage"></canvas>
+
+  <div id="hud">booting…</div>
+
+  <div id="hint">
+    drop an audio file &middot; <kbd>T</kbd> test signal &middot;
+    <kbd>Space</kbd> pause &middot; <kbd>&larr;</kbd><kbd>&rarr;</kbd> bar &middot;
+    <kbd>L</kbd> AVS graph &middot; <kbd>,</kbd><kbd>.</kbd> presets &middot; <kbd>P</kbd> auto &middot;
+    <kbd>O</kbd> projector &middot; <kbd>R</kbd> offline render &middot; <kbd>I</kbd> live input &middot;
+    <kbd>S</kbd> step grid &middot; <kbd>U</kbd><kbd>V</kbd><kbd>F</kbd> AVS display &middot;
+    <kbd>H</kbd> hud &middot; <kbd>D</kbd> debug &middot; <kbd>?</kbd> help
+  </div>
+
+  <div id="err" hidden></div>
+
+  <div id="guideWrap" hidden>
+    <div id="guide" role="dialog" aria-modal="true" aria-labelledby="guideTitle" tabindex="-1">
+      <header>
+        <h2 id="guideTitle">aaavs</h2>
+        <button class="x" id="guideClose" type="button" aria-label="Close">&times;</button>
+      </header>
+      <p class="lead">
+        A Winamp AVS compatibility studio. Feed it audio, inspect the real
+        ordered effect graph, and let the director cut presets on the bar.
+      </p>
+      <p class="warn" id="guideFlashWarning" role="note">
+        <b>Photosensitivity warning.</b> Many AVS presets flash, strobe and
+        flicker, and some can trigger seizures in people with photosensitive
+        epilepsy. Flash limiting is on by default in this window
+        (<b>FLASH LIMIT</b>, bottom right) and always on in the projector
+        window. It reduces large flashes; it does not guarantee a safe picture.
+        Stop watching if you feel unwell.
+      </p>
+
+      <h3>Get audio in</h3>
+      <table>
+        <tr><td><b>drop a file</b></td><td>drag any audio file onto the page. No permissions needed.</td></tr>
+        <tr><td><b>choose AVS</b></td><td>open <kbd>L</kbd>, then choose from Original AVS, the full local collection, or My AVS.</td></tr>
+        <tr><td><kbd>T</kbd></td><td>built-in 128&nbsp;BPM kick/hat signal for checking tempo lock and audio reactivity</td></tr>
+      </table>
+
+      <h3>Transport</h3>
+      <table>
+        <tr><td><kbd>Space</kbd></td><td>pause / resume without losing the audio-clock position</td></tr>
+        <tr><td><kbd>&larr;</kbd> <kbd>&rarr;</kbd></td><td>skip one musical bar backward / forward</td></tr>
+        <tr><td><kbd>L</kbd></td><td>the AVS panel also exposes all three transport controls</td></tr>
+      </table>
+
+      <h3>Presets</h3>
+      <table>
+        <tr><td><kbd>P</kbd></td><td>auto preset changes, responsive to energy and onsets on 2–12 bar boundaries</td></tr>
+        <tr><td><kbd>,</kbd> <kbd>.</kbd></td><td>previous / next preset</td></tr>
+        <tr><td><kbd>L</kbd></td><td>AVS panel &mdash; preset banks, ordered effect tree, inspector, mute, solo and power</td></tr>
+      </table>
+
+      <h3>AVS graph</h3>
+      <table>
+        <tr><td><b>P / M / S</b></td><td>power, mute or solo the exact selected AVS renderer</td></tr>
+        <tr><td><b>Save .avs</b></td><td>download the current ordered graph as an AVS preset</td></tr>
+        <tr><td><b>Add to My AVS</b></td><td>copy the current preset to your personal bank without switching sources</td></tr>
+        <tr><td><kbd>R</kbd></td><td>open the full-resolution offline track renderer</td></tr>
+      </table>
+
+      <h3>Projector</h3>
+      <table>
+        <tr><td><kbd>O</kbd></td><td>open a second window that shows only the visuals &mdash; no HUD, no panels, no hint bar. Drag it to the second display and fullscreen it.</td></tr>
+        <tr><td>how</td><td>the projector renders the show itself, on its own GPU device, from the preset and one packed audio frame per frame. A canvas cannot be moved between windows, so the description travels instead of the picture &mdash; no re-encode, no added latency.</td></tr>
+        <tr><td>this window</td><td>dims its stage while the projector holds the output, so it is obvious where the show went. Every control still works here.</td></tr>
+        <tr><td>either window</td><td>can be closed or reloaded at any time. They find each other again; audio is analysed once, here.</td></tr>
+      </table>
+
+      <h3>AVS display</h3>
+      <table>
+        <tr><td><kbd>U</kbd></td><td>upscale: pixelated (default) &middot; sharp-bilinear (identical on 1080p/1440p/4K, even pixels on 16:10 and projector panels) &middot; integer letterbox</td></tr>
+        <tr><td><kbd>V</kbd></td><td>AVS raster: classic 640 &middot; crisp integer-fit &middot; high (2&times;, steps back to classic under load). Crisp and high render a different raster, so pixel-sized effects look different.</td></tr>
+        <tr><td><kbd>F</kbd></td><td>frame rate: display &middot; 60 &middot; 30 locked. AVS presets animate per frame, so a lock also sets their speed.</td></tr>
+        <tr><td>both windows</td><td>the choice is remembered and the projector follows it. The HUD (<kbd>H</kbd>) shows what is actually in effect.</td></tr>
+        <tr><td><b>FLASH</b></td><td>flash limiting for this window: limit (default) &middot; strict &middot; off. Remembered. The projector is always limited, whatever this says.</td></tr>
+        <tr><td><b>GPU EXACT</b></td><td>AVS output is bit-exact by default. <b>GPU APPROX</b> allows faster approximate GPU effects in both windows; the preset restarts when it changes.</td></tr>
+      </table>
+
+      <h3>Live input</h3>
+      <table>
+        <tr><td><kbd>I</kbd></td><td>MIDI and OSC panel &mdash; pick a device, then <b>Learn</b> to bind a knob or pad to a target</td></tr>
+        <tr><td>OSC</td><td>the dev server bridges UDP&nbsp;127.0.0.1:9000 to the page; without it the panel simply reads offline</td></tr>
+      </table>
+
+      <h3>Step grid</h3>
+      <table>
+        <tr><td><kbd>S</kbd></td><td>16-step trigger lanes on the audio clock. Click a cell to write a step; the playhead follows the same 1/16 grid the layers do.</td></tr>
+        <tr><td>target</td><td>each lane picks one live target &mdash; the same list <kbd>I</kbd> binds MIDI to. The slider is the value a step hands it.</td></tr>
+        <tr><td>rest</td><td>a lane parked on <b>rest</b> fires nothing on purpose. Silence is a written choice, not an empty row.</td></tr>
+        <tr><td>precedence</td><td>a lane that changes presets takes them over: automatic preset changes stop while it has steps written.</td></tr>
+        <tr><td>tempo</td><td>the grid stays silent until tempo locks. It will not run on the assumed 120&nbsp;BPM &mdash; a written rhythm on a guessed grid is worse than none.</td></tr>
+      </table>
+
+      <h3>Diagnostics</h3>
+      <table>
+        <tr><td><kbd>H</kbd></td><td>hud &mdash; fps, tempo lock, scheduler lateness, GPU time</td></tr>
+        <tr><td><kbd>D</kbd></td><td>debug overlay &mdash; waveform, spectrum, spectrogram, stereo field, onset classes</td></tr>
+        <tr><td><kbd>?</kbd></td><td>this guide</td></tr>
+      </table>
+
+      <h3>Worth knowing</h3>
+      <table>
+        <tr><td>tempo</td><td>needs ~8 onsets to lock. Until it does, motion runs at an assumed 120&nbsp;BPM.</td></tr>
+        <tr><td>level 0.00</td><td>normal between transients &mdash; most of a percussive track is silence.</td></tr>
+        <tr><td>WebGPU</td><td>required. There is no WebGL2 fallback.</td></tr>
+      </table>
+
+      <button class="go" id="guideGo" type="button">Got it</button>
+    </div>
+  </div>
+
+  <script type="module" src="dist/main.js"></script>
+</body>
+</html>

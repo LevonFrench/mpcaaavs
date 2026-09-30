@@ -1614,6 +1614,7 @@ BEGIN
         MENUITEM "Na&vigation",                 ID_VIEW_NAVIGATION
         MENUITEM "Preset Manager...", ID_AAAVS_MANAGER
         MENUITEM "Setup Builder...", ID_AAAVS_SETUPS
+        MENUITEM "Play last preset folder", ID_AAAVS_PLAY_FOLDER
         POPUP "&Presets..."
         BEGIN
             MENUITEM "&Minimal",                    ID_VIEW_PRESETS_MINIMAL
@@ -2619,6 +2620,7 @@ BEGIN
     ID_AAAVS_RATE_DOWN "Visualizer: Lower rating"
     ID_AAAVS_RATE_UP "Visualizer: Raise rating"
     ID_AAAVS_NOT_WORKING "Visualizer: Mark preset not working"
+    ID_AAAVS_PLAY_FOLDER "Visualizer: Play last preset folder"
 END
 
 STRINGTABLE

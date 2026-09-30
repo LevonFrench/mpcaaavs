@@ -52,7 +52,7 @@ inline fs::path PresetPath(const fs::path& root, const std::string& relative) {
     if (relative.rfind("presets/", 0) != 0 || relative.find('\\') != std::string::npos || relative.find(':') != std::string::npos || relative.find('\0') != std::string::npos) throw std::runtime_error("Invalid preset path");
     fs::path p(Wide(relative));
     for (const auto& part : p) if (part == L".." || part == L"." || part.empty()) throw std::runtime_error("Invalid preset path");
-    if (p.extension() != L".avs" && p.extension() != L".nerv") throw std::runtime_error("Not a supported preset file");
+    if (p.extension() != L".avs" && p.extension() != L".nerv" && p.extension() != L".hud") throw std::runtime_error("Not a supported preset file");
     const auto result = root / p; NoLinks(result); return result;
 }
 inline void AtomicWrite(const fs::path& path, const std::string& data) {
@@ -97,6 +97,46 @@ inline std::string Rate(const fs::path& root, const std::string& hash, int ratin
         return Json(entry);
     }
     throw std::runtime_error("Unknown preset");
+}
+// Private page state (folders.json, stats.json). The page parser is the authority on content;
+// the host only bounds the name, size and well-formedness so a bad write can never corrupt the file.
+constexpr size_t kStateMaxBytes = 3670016;   // STATE_MAX_BYTES in src/mpc-contract.ts, below the 4 MiB request cap
+inline bool StateName(const std::string& name) { return name == "folders" || name == "stats"; }
+// rapidjson parses and writes values recursively; refuse absurd nesting before either runs.
+inline bool DepthOk(const std::string& text, int limit = 64) {
+    int depth = 0; bool inString = false, escaped = false;
+    for (const char c : text) {
+        if (inString) { if (escaped) escaped = false; else if (c == '\\') escaped = true; else if (c == '"') inString = false; continue; }
+        if (c == '"') inString = true;
+        else if ((c == '{' || c == '[') && ++depth > limit) return false;
+        else if ((c == '}' || c == ']') && depth > 0) --depth;
+    }
+    return true;
+}
+inline void ShallowState(const rapidjson::Value& data) {
+    if (!data.IsObject() || !data.HasMember("version") || !data["version"].IsInt() || data["version"].GetInt() < 1) throw std::runtime_error("Invalid state file");
+}
+inline std::string LoadState(const fs::path& root, const std::string& name) {
+    if (!StateName(name)) throw std::runtime_error("Unknown state file");
+    NoLinks(root); const auto path = root / Wide(name + ".json"); NoLinks(path);
+    std::string body = "null";
+    if (fs::exists(path)) {
+        if (!fs::is_regular_file(path) || fs::file_size(path) > kStateMaxBytes) throw std::runtime_error("Saved state is too large or invalid");
+        const auto text = Read(path);
+        if (!DepthOk(text)) throw std::runtime_error("Saved state is corrupt");
+        rapidjson::Document doc; doc.Parse<rapidjson::kParseIterativeFlag>(text.c_str());
+        if (doc.HasParseError()) throw std::runtime_error("Saved state is corrupt");
+        ShallowState(doc);
+        body = Json(doc);
+    }
+    return "{\"type\":\"state-loaded\",\"name\":\"" + name + "\",\"data\":" + body + "}";
+}
+inline std::string SaveState(const fs::path& root, const std::string& name, const rapidjson::Value& data) {
+    if (!StateName(name)) throw std::runtime_error("Unknown state file");
+    ShallowState(data);
+    const auto text = Json(data); if (text.size() > kStateMaxBytes) throw std::runtime_error("State is too large");
+    NoLinks(root); AtomicWrite(root / Wide(name + ".json"), text);
+    return "{\"type\":\"state-saved\",\"name\":\"" + name + "\"}";
 }
 inline std::string SetNotWorking(const fs::path& root, const std::string& hash, bool notWorking) {
     if (!std::regex_match(hash, std::regex("[0-9a-f]{64}"))) throw std::runtime_error("Invalid preset status request");

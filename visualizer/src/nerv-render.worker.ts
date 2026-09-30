@@ -1,8 +1,20 @@
-import type { AvsWorkerRequest } from './avs-worker-protocol.ts';
+/** NERV scene worker: renders one scene per request and, for a clocked change, composites both plates through AvsTransition.
+ * Stateless across seeks: every frame is rebuilt from the absolute clock in the message (docs/design/CONTRACT.md 2.3.4).
+ *  - Size: the requested size is fitted uniformly inside HARD_MAX_EDGE and HARD_MAX_PIXELS (render-resolution.ts), never per axis, and the applied size is reported.
+ *  - Timing: the saved grid and the scene bounds reach both plates; the outgoing plate gets its own bounds so its interval signals are its own.
+ *  - Transition: the env is built from timingSignals() and the wire fields; the construction context and cache key follow mode:seed:beats:boundary:reduced.
+ *  - Memory: the two transition surfaces and the cached transition are released as soon as a frame no longer needs them.
+ *  - Errors: a non-finite clock number, a malformed grid or a negative fadeSeconds throw 'Invalid transition clock'; a transition style, length,
+ *    boundary, accent or reduced flag outside its range throws 'Invalid scene transition'. `grid`, `sceneStart`, `sceneEnd`, `previousSceneStart` and
+ *    `previousSceneEnd` may be null (absent). */
+import type { AvsWorkerRequest, NervPlaybackFrame } from './avs-worker-protocol.ts';
 import type { AvsAudioFrame } from './avs/types.ts';
-import { NERV_SCENES, renderNervScene, type NervSceneId } from './nerv-scenes.ts';
+import { NERV_SCENES, renderNervScene, type NervSceneFrame, type NervSceneId } from './nerv-scenes.ts';
 import { parseNervPreset } from './nerv-preset.ts';
-import { AvsTransition } from './mpc-transition.ts';
+import { AvsTransition, TRANSITION_CUT, transitionLevel, type TransitionEnv } from './mpc-transition.ts';
+import { TRANSITION_COUNT } from './mpc-contract.ts';
+import { compileClockGrid, timingSignals } from './mpc-beat-grid.ts';
+import { HARD_MAX_EDGE, HARD_MAX_PIXELS, fitWithin } from './render-resolution.ts';
 
 const scope = self as unknown as {
   onmessage: ((event: MessageEvent<AvsWorkerRequest>) => void) | null;
@@ -18,43 +30,76 @@ function surface(current: OffscreenCanvas | null, width: number, height: number)
   if (result.height !== height) result.height = height;
   return result;
 }
+/** Drop the transition-only state (both plate surfaces and the cached transition with its scratch surfaces). Zero-sized first, so the backing store goes now rather than at the next collection. */
+function release(): void {
+  for (const c of [oldCanvas,nextCanvas]) if (c) { c.width = 0; c.height = 0; }
+  oldCanvas = nextCanvas = null; transition = null; transitionKey = '';
+}
+const finite = (value: unknown): boolean => typeof value === 'number' && Number.isFinite(value);
+const optional = (value: unknown): boolean => value === undefined || finite(value);
+const nullable = (value: unknown): boolean => value === undefined || value === null || finite(value);
+const integer = (value: unknown, low: number, high: number): boolean => typeof value === 'number' && Number.isInteger(value) && value >= low && value <= high;
+function validate(clock: NervPlaybackFrame): void {
+  if (![clock.time,clock.localTime,clock.progress,clock.bpm,clock.seed].every(Number.isFinite)) throw Error('Invalid scene clock');
+  if (![clock.previousTime,clock.previousLocalTime,clock.blend,clock.transitionMode,clock.transitionSeed,clock.transitionBeats,clock.fadeSeconds].every(optional)
+    || ![clock.sceneStart,clock.sceneEnd,clock.previousSceneStart,clock.previousSceneEnd].every(nullable)
+    || clock.fadeSeconds !== undefined && clock.fadeSeconds < 0
+    || clock.grid != null && !compileClockGrid(clock.grid)) throw Error('Invalid transition clock');
+  if (clock.previousScene !== undefined && !NERV_SCENES.includes(clock.previousScene)) throw Error('Invalid previous scene');
+  const {transitionMode:mode = 1,transitionBeats:beats = 4,transitionBoundary:boundary = 0,transitionAccent:accent = 1,transitionReduced:reduced = false} = clock;
+  if (!integer(mode,0,TRANSITION_COUNT - 1) || !(beats > 0 && beats <= 64) || !integer(boundary,0,3) || !integer(accent,0,1) || typeof reduced !== 'boolean') throw Error('Invalid scene transition');
+}
+/** One plate's frame: only NervSceneFrame keys, with the given scene bounds (never the other plate's). */
+function plate(clock: NervPlaybackFrame, audio: AvsAudioFrame, scene: NervSceneId, time: number, localTime: number, progress: number, start: number | null | undefined, end: number | null | undefined): NervSceneFrame {
+  return {scene,time,localTime,progress,bpm:clock.bpm,seed:clock.seed,audio,
+    ...(clock.grid ? {grid:clock.grid} : {}),...(typeof start === 'number' ? {sceneStart:start} : {}),...(typeof end === 'number' ? {sceneEnd:end} : {})};
+}
 scope.onmessage = ({data: message}) => {
   try {
     if (message.type === 'load') {
       scene = parseNervPreset(message.preset); generation = message.generation;
-      transition = null; transitionKey = '';
+      release();
       scope.postMessage({type:'ready',generation,unsupported:0}); return;
     }
     if (message.generation !== generation || message.type !== 'render' || !scene) return;
-    const width = Math.max(64,Math.min(1280,Math.floor(message.width))), height = Math.max(64,Math.min(720,Math.floor(message.height)));
-    if (!Number.isFinite(width) || !Number.isFinite(height)) throw Error('Invalid scene size');
+    const started = performance.now();
+    if (!Number.isFinite(message.width) || !Number.isFinite(message.height)) throw Error('Invalid scene size');
+    const {width,height} = fitWithin(message.width,message.height,HARD_MAX_EDGE,HARD_MAX_PIXELS);
     canvas = surface(canvas,width,height);
     const ctx = canvas.getContext('2d',{alpha:false}); if (!ctx) throw Error('NERV canvas unavailable');
-    const clock = message.nerv ?? {time:0,localTime:0,progress:0,bpm:120,seed:1};
-    if (![clock.time,clock.localTime,clock.progress,clock.bpm,clock.seed].every(Number.isFinite)) throw Error('Invalid scene clock');
-    if ([clock.previousTime,clock.previousLocalTime,clock.blend,clock.transitionMode,clock.transitionSeed].some(value => value !== undefined && !Number.isFinite(value))) throw Error('Invalid transition clock');
-    if (clock.previousScene !== undefined && !NERV_SCENES.includes(clock.previousScene)) throw Error('Invalid previous scene');
+    const clock: NervPlaybackFrame = message.nerv ?? {time:0,localTime:0,progress:0,bpm:120,seed:1};
+    validate(clock);
     const mode = clock.transitionMode ?? 1, seed = (clock.transitionSeed ?? clock.seed) >>> 0;
-    if (!Number.isInteger(mode) || mode < 0 || mode > 15) throw Error('Invalid scene transition');
-    const audio = message.audio ?? silence;
+    const audio = message.audio ?? silence, previous = clock.previousScene, blend = clock.blend;
     // Reconstruct both sides from media time, including after a direct seek into a fade.
     // Sources remain separate from the output, so pushes never sample their own writes.
-    if (clock.previousScene && clock.blend !== undefined && clock.blend < 1) {
+    if (previous && blend !== undefined && blend < 1) {
+      const beats = clock.transitionBeats ?? 4, boundary = (clock.transitionBoundary ?? 0) as 0 | 1 | 2 | 3, reduced = clock.transitionReduced === true;
       nextCanvas = surface(nextCanvas,width,height); oldCanvas = surface(oldCanvas,width,height);
       const next = nextCanvas.getContext('2d',{alpha:false}); if (!next) throw Error('NERV transition canvas unavailable');
       const old = oldCanvas.getContext('2d',{alpha:false}); if (!old) throw Error('NERV transition canvas unavailable');
-      renderNervScene(next,width,height,{...clock,scene,audio});
-      renderNervScene(old,width,height,{...clock,time:clock.previousTime??clock.time,scene:clock.previousScene,localTime:clock.previousLocalTime ?? clock.localTime,progress:1,audio});
-      const key = `${mode}:${seed}`;
+      renderNervScene(next,width,height,plate(clock,audio,scene,clock.time,clock.localTime,clock.progress,clock.sceneStart,clock.sceneEnd));
+      renderNervScene(old,width,height,plate(clock,audio,previous,clock.previousTime ?? clock.time,clock.previousLocalTime ?? clock.localTime,1,clock.previousSceneStart,clock.previousSceneEnd));
+      const key = `${mode}:${seed}:${beats}:${boundary}:${reduced ? 1 : 0}`;
       if (!transition || key !== transitionKey) {
-        transition = new AvsTransition(mode,{seed,createCanvas:()=>new OffscreenCanvas(1,1)});
+        transition = new AvsTransition(mode,{seed,createCanvas:()=>new OffscreenCanvas(1,1),context:{beatsTotal:beats,boundary,nervPair:true,reducedMotion:reduced},smooth:true});
         transitionKey = key;
       }
-      if (clock.blend <= 0 && mode !== 15) ctx.drawImage(oldCanvas,0,0,width,height);
-      else transition.draw(ctx,oldCanvas,nextCanvas,clock.blend,width,height);
-    } else renderNervScene(ctx,width,height,{...clock,scene,audio});
-    const bitmap = canvas.transferToImageBitmap();
-    scope.postMessage({type:'frame',generation,sequence:message.sequence,bitmap,pcm:message.pcm,width,height,unsupported:0,renderMs:0},[bitmap,message.pcm]);
+      if (blend <= 0 && mode !== TRANSITION_CUT) ctx.drawImage(oldCanvas,0,0,width,height);
+      else {
+        // Beat and bar phase come from the saved grid when the frame carries one, else from the legacy tempo (timingSignals is exact either way).
+        const signals = timingSignals(clock.time,clock.grid ?? null,clock.sceneStart ?? null,clock.sceneEnd ?? null,{bpm:Math.min(400,Math.max(20,clock.bpm)),localTime:clock.localTime});
+        const bpm = compileClockGrid(clock.grid)?.bpmAt(clock.time) ?? clock.bpm;
+        const env: Partial<TransitionEnv> = {bpm,beatPhase:signals.beatPhase,barPhase:signals.barPhase,beatsTotal:beats,level:transitionLevel(audio),
+          accent:clock.transitionAccent === 0 ? 0 : 1,reducedMotion:reduced,...(clock.fadeSeconds !== undefined ? {seconds:clock.fadeSeconds} : {})};
+        transition.draw(ctx,oldCanvas,nextCanvas,blend,width,height,env);
+      }
+    } else {
+      release();
+      renderNervScene(ctx,width,height,plate(clock,audio,scene,clock.time,clock.localTime,clock.progress,clock.sceneStart,clock.sceneEnd));
+    }
+    const bitmap = canvas.transferToImageBitmap(), elapsed = performance.now() - started;
+    scope.postMessage({type:'frame',generation,sequence:message.sequence,bitmap,pcm:message.pcm,width,height,unsupported:0,renderMs:elapsed > 0 ? elapsed : 0},[bitmap,message.pcm]);
   } catch (error) {
     scope.postMessage({type:'error',generation:message.generation,message:String(error),fatal:true});
   }

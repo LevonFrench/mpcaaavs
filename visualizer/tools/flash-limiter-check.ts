@@ -6,7 +6,7 @@ import {
   FlashLimiter, computeFrameStatsPacked, computeFrameStatsRgba, createFrameStats, limitPackedFrame, limitRgbaFrame,
   parseFlashMode, type FlashMode,
 } from '../src/flash-limiter.ts';
-import { FlashGate, PROBE_H, PROBE_W } from '../src/flash-gate.ts';
+import { FlashGate, PROBE_H, PROBE_W, canvasProbeSampler } from '../src/flash-gate.ts';
 
 let checks = 0;
 const W = 640;
@@ -338,6 +338,74 @@ assert(parseFlashMode(undefined, 'off') === 'off' && parseFlashMode('strict', 'o
   g2.present(sized, probe as unknown as CanvasImageSource, 1 + 1 / FPS, () => { sized.canvas.width = 1280; });
   fill(255);
   equal(g2.present(sized, probe as unknown as CanvasImageSource, 1 + 2 / FPS, () => undefined).blend, 1, 'after a resize the gate starts fresh');
+}
+
+// 9b. The probe sampler (src/flash-gate.ts canvasProbeSampler), against a fake OffscreenCanvas that logs every call. The `smoothingQuality`
+//     option (RES 5.8, safety-relevant at 7.5x to 15x downsampling) must be plumbed onto the probe context and must change nothing else,
+//     and the default sampler must stay exactly what it always was: no quality assignment at all.
+{
+  const scope = globalThis as unknown as Record<string, unknown>;
+  const original = scope.OffscreenCanvas;
+  const log: string[] = [];
+  let contexts = 0, canvases = 0, throwOnDraw = false, noContext = false;
+  class FakeContext {
+    set imageSmoothingEnabled(v: boolean) { log.push(`enabled=${v}`); }
+    set imageSmoothingQuality(v: string) { log.push(`quality=${v}`); }
+    drawImage(_source: unknown, ...rest: number[]): void { if (throwOnDraw) throw new Error('detached'); log.push(`draw(${rest.join(',')})`); }
+    getImageData(x: number, y: number, w: number, h: number): { data: Uint8ClampedArray } { log.push(`read(${x},${y},${w},${h})`); return { data: new Uint8ClampedArray(w * h * 4).fill(7) }; }
+  }
+  class FakeOffscreen {
+    constructor(w: number, h: number) { canvases++; log.push(`canvas(${w},${h})`); }
+    getContext(kind: string, options: unknown): FakeContext | null { contexts++; log.push(`ctx(${kind},${JSON.stringify(options)})`); return noContext ? null : new FakeContext(); }
+  }
+  const reset = (): void => { log.length = 0; contexts = 0; canvases = 0; throwOnDraw = false; noContext = false; };
+  const once = (sampler: ReturnType<typeof canvasProbeSampler>): string => { log.length = 0; const px = sampler({} as CanvasImageSource); assert(px !== null && px.length === PROBE_W * PROBE_H * 4 && px[0] === 7, 'sampler returns the probe pixels'); return log.join(' '); };
+  try {
+    scope.OffscreenCanvas = FakeOffscreen;
+    equal(PROBE_W, 256, 'probe width'); equal(PROBE_H, 144, 'probe height');
+    const baseline = `canvas(256,144) ctx(2d,{"alpha":false}) enabled=true draw(0,0,256,144) read(0,0,256,144)`;
+    // Default, empty options and undefined quality are all today's sampler: smoothing on, and no quality assignment whatsoever.
+    assert(once(canvasProbeSampler()) === baseline, `default sampler is unchanged: ${log.join(' ')}`);
+    assert(once(canvasProbeSampler({})) === baseline, 'empty options keep the default');
+    assert(once(canvasProbeSampler({ smoothingQuality: undefined })) === baseline, 'undefined quality keeps the default');
+    assert(!log.some((entry) => entry.startsWith('quality=')), 'the default never assigns imageSmoothingQuality');
+    // Unknown qualities are ignored rather than forwarded to the context.
+    for (const bad of ['best', '', 5, null, {}]) assert(once(canvasProbeSampler({ smoothingQuality: bad as unknown as ImageSmoothingQuality })) === baseline, `invalid quality ${String(bad)} is ignored`);
+    // The option: exactly one extra assignment, right after imageSmoothingEnabled, and the same probe geometry and readback.
+    for (const quality of ['low', 'medium', 'high'] as const) {
+      const text = once(canvasProbeSampler({ smoothingQuality: quality }));
+      assert(text === `canvas(256,144) ctx(2d,{"alpha":false}) enabled=true quality=${quality} draw(0,0,256,144) read(0,0,256,144)`, `quality ${quality} is plumbed: ${text}`);
+    }
+    // One reused canvas and context: later calls only draw and read; the quality is set once.
+    reset();
+    const reused = canvasProbeSampler({ smoothingQuality: 'medium' });
+    reused({} as CanvasImageSource); reused({} as CanvasImageSource); reused({} as CanvasImageSource);
+    assert(canvases === 1 && contexts === 1 && log.filter((entry) => entry === 'quality=medium').length === 1 && log.filter((entry) => entry.startsWith('draw(')).length === 3, 'the probe canvas and its quality are created once');
+    // Failure handling is the same with and without the option.
+    for (const options of [undefined, { smoothingQuality: 'medium' as const }]) {
+      reset(); throwOnDraw = true;
+      const flaky = canvasProbeSampler(options);
+      assert(flaky({} as CanvasImageSource) === null, 'a throwing draw skips the frame');
+      throwOnDraw = false;
+      assert(flaky({} as CanvasImageSource) !== null, 'and the sampler keeps trying');
+      reset(); noContext = true;
+      const dead = canvasProbeSampler(options);
+      assert(dead({} as CanvasImageSource) === null && dead({} as CanvasImageSource) === null && contexts === 1, 'no 2D context: null, and it does not retry');
+    }
+    scope.OffscreenCanvas = undefined;
+    assert(canvasProbeSampler({ smoothingQuality: 'medium' })({} as CanvasImageSource) === null, 'no OffscreenCanvas: null');
+    delete scope.OffscreenCanvas;
+    assert(canvasProbeSampler()({} as CanvasImageSource) === null, 'no OffscreenCanvas global at all: null');
+    // Through the gate: the constructor default is the default sampler; an injected medium sampler reads the same probe and limits the same strobe.
+    scope.OffscreenCanvas = FakeOffscreen; reset();
+    const viaDefault = new FlashGate('limit'), viaMedium = new FlashGate('limit', canvasProbeSampler({ smoothingQuality: 'medium' }));
+    const ctxA = { globalAlpha: 1, canvas: { width: 640, height: 360 } }, ctxB = { globalAlpha: 1, canvas: { width: 640, height: 360 } };
+    viaDefault.present(ctxA, {} as CanvasImageSource, 0, () => undefined); viaMedium.present(ctxB, {} as CanvasImageSource, 0, () => undefined);
+    assert(viaDefault.available && viaMedium.available, 'both gates read the fake probe');
+    assert(log.filter((entry) => entry === 'quality=medium').length === 1 && !log.some((entry) => entry === 'quality=low' || entry === 'quality=high'), 'only the injected sampler set a quality');
+  } finally {
+    if (original === undefined) delete scope.OffscreenCanvas; else scope.OffscreenCanvas = original;
+  }
 }
 
 // 10. Cost. Target < 0.3 ms at 640x360; the gate is loose because CI machines vary.

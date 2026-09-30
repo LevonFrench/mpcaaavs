@@ -9,6 +9,7 @@
 #include "AAAVSLibrary.h"
 #include "../DSUtil/AAAVSAudio.h"
 #include "resource.h"
+#include "AAAVSTransitionNames.h"
 #include <WebView2.h>
 #include <wrl.h>
 #include <sstream>
@@ -16,6 +17,12 @@
 
 using Microsoft::WRL::ComPtr;
 using Microsoft::WRL::Callback;
+// Legacy 'beats' <-> 'fadeTiming' projection; the tables in src/mpc-contract.ts are authoritative.
+static int FadeFromBeats(int b) { return b == 1 ? 2 : b == 2 ? 3 : b == 4 ? 4 : 0; }
+static int BeatsFromFade(int f) { return f == 2 ? 1 : f == 3 ? 2 : f == 4 ? 4 : 0; }
+static constexpr UINT kTransitionMenuBase = 100;
+static constexpr wchar_t kHostClass[] = L"AAAVSInteractiveHost";
+static_assert(kTransitionMenuBase == 100 && kTransitionCount <= 100, "transition menu IDs 100-199 (contract 2.5.4)");
 static std::wstring ProgramFolder() {
     wchar_t path[32768]{};
     const DWORD length = GetModuleFileNameW(nullptr, path, _countof(path));
@@ -30,7 +37,8 @@ struct AAAVSView::State {
         try {
             const auto request = AAAVSLibrary::Utf8(text);
             if (request.size() > 4 * 1024 * 1024) throw std::runtime_error("Library request is too large");
-            rapidjson::Document d; d.Parse(request.c_str());
+            if (!AAAVSLibrary::DepthOk(request)) throw std::runtime_error("Invalid library request");
+            rapidjson::Document d; d.Parse<rapidjson::kParseIterativeFlag>(request.c_str());
             if (d.HasParseError() || !d.IsObject() || !d.HasMember("op") || !d["op"].IsString()) throw std::runtime_error("Invalid library request");
             const std::string op = d["op"].GetString();
             operation = op;
@@ -46,13 +54,25 @@ struct AAAVSView::State {
             } else if (op == "save-setups" && d.HasMember("setups") && d["setups"].IsArray() && d["setups"].Size() <= 100) {
                 AAAVSLibrary::AtomicWrite(root / L"setups.json", AAAVSLibrary::Json(d["setups"]));
                 response = "{\"type\":\"setups-saved\"}";
+            } else if (op == "load-state" || op == "save-state") {
+                if (!d.HasMember("name") || !d["name"].IsString()) throw std::runtime_error("Invalid state request");
+                const std::string name = d["name"].GetString();
+                if (op == "load-state") response = AAAVSLibrary::LoadState(root, name);
+                else if (d.HasMember("data")) response = AAAVSLibrary::SaveState(root, name, d["data"]);
+                else throw std::runtime_error("Invalid state request");
             } else if (op == "configure" && d.HasMember("settings") && d["settings"].IsObject()) {
                 const auto& v = d["settings"];
                 auto integer = [&](const char* key, int fallback) { return v.HasMember(key) && v[key].IsInt() ? v[key].GetInt() : fallback; };
                 auto boolean = [&](const char* key, bool fallback) { return v.HasMember(key) && v[key].IsBool() ? v[key].GetBool() : fallback; };
                 bars = integer("bars",0); if (bars != 2 && bars != 4 && bars != 8 && bars != 12) bars = 0;
-                transition = std::clamp(integer("transition",1),0,15);
-                beats = integer("beats",0); if (beats != 1 && beats != 2 && beats != 4) beats = 0;
+                transition = std::clamp(integer("transition",1),0,kTransitionCount - 1);
+                // Fade fields (contract 2.5.2): the request wins, then the legacy 'beats' projection, then the current member.
+                // Display preferences never travel through configure.
+                auto member = [&](const char* key, int low, int high, int current) { return v.HasMember(key) && v[key].IsInt() && v[key].GetInt() >= low && v[key].GetInt() <= high ? v[key].GetInt() : current; };
+                if (v.HasMember("fadeTiming") && v["fadeTiming"].IsInt() && v["fadeTiming"].GetInt() >= 0 && v["fadeTiming"].GetInt() <= 6) fadeTiming = v["fadeTiming"].GetInt();
+                else if (v.HasMember("beats") && v["beats"].IsInt()) fadeTiming = FadeFromBeats(v["beats"].GetInt());
+                fadeRandomSet = member("fadeRandomSet", 1, 31, fadeRandomSet); fadeAnchor = member("fadeAnchor", 0, 2, fadeAnchor); queueQuantize = member("queueQuantize", 0, 3, queueQuantize);
+                beats = BeatsFromFade(fadeTiming);
                 durationMs = std::clamp(integer("durationMs",2000),250,8000);
                 minimumRating = std::clamp(integer("minimumRating",0),0,5);
                 automatic=boolean("enabled",true); shuffle=boolean("shuffle",false); keepOld=boolean("keepOld",true);
@@ -67,39 +87,71 @@ struct AAAVSView::State {
         }
     }
     HWND parent = nullptr;
+    HWND host = nullptr;
     bool started = false, closed = false, visible = false, ready = false, failed = false, shuffle = false, pending = false;
     bool automatic = true, keepOld = true, manualFade = true, autoFade = true, preferencesLoaded = false;
     int bars = 0, transition = 1, beats = 0, durationMs = 2000, minimumRating = 0;
+    int fadeTiming = -1, fadeRandomSet = 31, fadeAnchor = 0, queueQuantize = 0;   // fadeTiming -1: derive from Beats on first load
+    int showFps = 1, timingOverlay = 0, quality = 0, avsResolution = 0, pixelArt = 0;   // device-local display preferences
     ULONGLONG retryAt = 0;
     void Preferences(bool save) {
         auto app = AfxGetApp(); if (!app) return;
+        if (save) { if (fadeTiming < 0 || fadeTiming > 6) fadeTiming = FadeFromBeats(beats); beats = BeatsFromFade(fadeTiming); }
         auto value = [&](LPCWSTR key, int current) { if (save) { app->WriteProfileInt(L"AAAVS", key, current); return current; } return int(app->GetProfileInt(L"AAAVS", key, current)); };
         automatic = value(L"Auto", automatic) != 0; shuffle = value(L"Shuffle", shuffle) != 0;
         minimumRating = std::clamp(value(L"MinimumRating", minimumRating), 0, 5);
         keepOld = value(L"KeepOld", keepOld) != 0; manualFade = value(L"ManualFade", manualFade) != 0; autoFade = value(L"AutoFade", autoFade) != 0;
         bars = value(L"Bars", bars); if (bars != 2 && bars != 4 && bars != 8 && bars != 12) bars = 0;
-        transition = value(L"Transition", transition); if (transition < 0 || transition > 15) transition = 1;
+        transition = value(L"Transition", transition); if (transition < 0 || transition > kTransitionCount - 1) transition = 1;
         beats = value(L"Beats", beats); if (beats != 1 && beats != 2 && beats != 4) beats = 0;
-        durationMs = value(L"DurationMs", durationMs); if (durationMs < 250 || durationMs > 80000) durationMs = 2000;
+        durationMs = value(L"DurationMs", durationMs); if (durationMs < 250 || durationMs > 8000) durationMs = 2000;
+        fadeTiming = value(L"FadeTiming", fadeTiming); if (!save && (fadeTiming < 0 || fadeTiming > 6)) fadeTiming = FadeFromBeats(beats);
+        fadeRandomSet = std::clamp(value(L"FadeRandomSet", fadeRandomSet), 1, 31);
+        fadeAnchor = std::clamp(value(L"FadeAnchor", fadeAnchor), 0, 2);
+        queueQuantize = std::clamp(value(L"QueueQuantize", queueQuantize), 0, 3);
+        showFps = std::clamp(value(L"ShowFps", showFps), 0, 2);
+        timingOverlay = std::clamp(value(L"TimingOverlay", timingOverlay), 0, 1);
+        quality = std::clamp(value(L"Quality", quality), 0, 4);
+        avsResolution = std::clamp(value(L"AvsResolution", avsResolution), 0, 2);
+        pixelArt = std::clamp(value(L"PixelArt", pixelArt), 0, 2);
+        beats = BeatsFromFade(fadeTiming);   // legacy projection, always written back
         preferencesLoaded = true;
     }
     void InitializationFailed() {
         ready = false; started = false; failed = true; pending = false; retryAt = GetTickCount64() + 5000;
         if (controller) controller->Close(); web.Reset(); controller.Reset();
+        if (host) ShowWindow(host, SW_HIDE);
         OutputDebugString(L"mpc-hc-aaavs: initialization failed; retrying in five seconds.\n");
     }
     void Settings() {
         Preferences(true);
         if (!web) return;
         std::wostringstream json;
+        json.imbue(std::locale::classic());
         json << L"{\"type\":\"settings\",\"enabled\":" << (automatic ? L"true" : L"false")
              << L",\"bars\":" << bars << L",\"transition\":" << transition << L",\"beats\":" << beats
              << L",\"shuffle\":" << (shuffle ? L"true" : L"false")
              << L",\"minimumRating\":" << minimumRating
              << L",\"manualFade\":" << (manualFade ? L"true" : L"false") << L",\"autoFade\":" << (autoFade ? L"true" : L"false")
              << L",\"durationMs\":" << durationMs
-             << L",\"keepOld\":" << (keepOld ? L"true" : L"false") << L"}";
+             << L",\"keepOld\":" << (keepOld ? L"true" : L"false")
+             << L",\"fadeTiming\":" << fadeTiming << L",\"fadeRandomSet\":" << fadeRandomSet << L",\"fadeAnchor\":" << fadeAnchor << L",\"queueQuantize\":" << queueQuantize
+             << L",\"showFps\":" << showFps << L",\"timingOverlay\":" << timingOverlay
+             << L",\"quality\":" << quality << L",\"avsResolution\":" << avsResolution << L",\"pixelArt\":" << pixelArt << L"}";
         web->PostWebMessageAsJson(json.str().c_str());
+    }
+    // Page-to-native 'display:{...}' string: clamp each present key, persist, and re-send the snapshot.
+    void Display(const wchar_t* text) {
+        try {
+            if (!text || wcslen(text) > 512) return;
+            const auto request = AAAVSLibrary::Utf8(text);
+            rapidjson::Document d; d.Parse<rapidjson::kParseIterativeFlag>(request.c_str());
+            if (d.HasParseError() || !d.IsObject()) return;
+            auto apply = [&](const char* key, int& target, int high) { if (d.HasMember(key) && d[key].IsInt()) target = std::clamp(d[key].GetInt(), 0, high); };
+            apply("quality", quality, 4); apply("avsResolution", avsResolution, 2); apply("pixelArt", pixelArt, 2);
+            apply("showFps", showFps, 2); apply("timingOverlay", timingOverlay, 1);
+            Settings();
+        } catch (...) {}
     }
     ULONGLONG sent = 0;
     unsigned long long audioSequence = 0;
@@ -110,6 +162,11 @@ struct AAAVSView::State {
 AAAVSView::AAAVSView() : state(std::make_shared<State>()) {}
 AAAVSView::~AAAVSView() { Close(); }
 bool AAAVSView::Ready() const { return state->ready && state->visible; }
+bool AAAVSView::PanelOpen() const { return state->panel != 0; }
+bool AAAVSView::IsHostWindow(HWND window) {
+    wchar_t name[64]{};
+    return GetClassNameW(window, name, _countof(name)) && wcscmp(name, kHostClass) == 0;
+}
 bool AAAVSView::Shuffle() const { return state->shuffle; }
 bool AAAVSView::Automatic() const { return state->automatic; }
 void AAAVSView::Close() {
@@ -118,10 +175,12 @@ void AAAVSView::Close() {
     if (state->controller) state->controller->Close();
     state->web.Reset();
     state->controller.Reset();
+    if (state->host) { DestroyWindow(state->host); state->host = nullptr; }
 }
 void AAAVSView::Resize() {
     if (state->controller && IsWindow(state->parent)) {
         RECT bounds; GetClientRect(state->parent, &bounds);
+        if (state->host) MoveWindow(state->host, 0, 0, bounds.right, bounds.bottom, TRUE);
         state->controller->put_Bounds(bounds);
     }
 }
@@ -143,6 +202,7 @@ void AAAVSView::Command(UINT command) {
     if (command == ID_AAAVS_NOT_WORKING) {
         state->web->PostWebMessageAsJson(L"{\"type\":\"not-working\"}"); return;
     }
+    if (command == ID_AAAVS_PLAY_FOLDER) { state->web->PostWebMessageAsJson(L"{\"type\":\"play-folder\"}"); return; }
     if (command == ID_AAAVS_OPTIONS) { Options(); return; }
     if (command == ID_AAAVS_AUTO) { state->automatic = !state->automatic; state->Settings(); return; }
     if (command == ID_AAAVS_SHUFFLE) {
@@ -152,7 +212,7 @@ void AAAVSView::Command(UINT command) {
         state->web->PostWebMessageAsJson(command == ID_AAAVS_PREVIOUS ? L"{\"type\":\"previous\"}" : L"{\"type\":\"next\"}");
     }
 }
-void AAAVSView::Tick(HWND parent, bool visible, bool playing, LONGLONG position) {
+void AAAVSView::Tick(HWND parent, bool visible, bool playing, LONGLONG position, LONGLONG duration) {
     auto s = state;
     visible = visible || s->panel != 0;
     if (s->closed) return;
@@ -167,11 +227,23 @@ void AAAVSView::Tick(HWND parent, bool visible, bool playing, LONGLONG position)
         const auto page = folder + L"\\mpc.html";
         if (GetFileAttributesW(page.c_str()) == INVALID_FILE_ATTRIBUTES) { s->InitializationFailed(); return; }
         const auto profile = base + L"AAAVS.WebView2";
+        // MPC disables renderer children during graph setup. Keep the interactive
+        // WebView in a distinct child so that setup can leave its input enabled.
+        if (!s->host) {
+            WNDCLASSW wc{}; wc.lpfnWndProc = DefWindowProcW;
+            wc.hInstance = GetModuleHandleW(nullptr); wc.lpszClassName = kHostClass;
+            wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+            if (!RegisterClassW(&wc) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) { s->InitializationFailed(); return; }
+            RECT bounds; GetClientRect(parent, &bounds);
+            s->host = CreateWindowExW(0, kHostClass, L"", WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
+                0, 0, bounds.right, bounds.bottom, parent, nullptr, wc.hInstance, nullptr);
+            if (!s->host) { s->InitializationFailed(); return; }
+        }
         HRESULT hr = CreateCoreWebView2EnvironmentWithOptions(nullptr, profile.c_str(), nullptr,
             Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>([s, folder](HRESULT result, ICoreWebView2Environment* env) -> HRESULT {
                 if (s->closed) return S_OK;
                 if (FAILED(result) || !env) { s->InitializationFailed(); return S_OK; }
-                const HRESULT creation = env->CreateCoreWebView2Controller(s->parent,
+                const HRESULT creation = env->CreateCoreWebView2Controller(s->host,
                     Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>([s, folder](HRESULT result, ICoreWebView2Controller* controller) -> HRESULT {
                         if (s->closed || FAILED(result) || !controller) { if (controller) controller->Close(); if (!s->closed) s->InitializationFailed(); return S_OK; }
                         s->controller = controller;
@@ -221,6 +293,8 @@ void AAAVSView::Tick(HWND parent, bool visible, bool playing, LONGLONG position)
                                 if (wcscmp(message, L"rate-down") == 0) ::PostMessage(GetParent(s->parent), WM_COMMAND, ID_AAAVS_RATE_DOWN, 0);
                                 if (wcscmp(message, L"mark-not-working") == 0) ::PostMessage(GetParent(s->parent), WM_COMMAND, ID_AAAVS_NOT_WORKING, 0);
                                 if (wcscmp(message, L"options") == 0) ::PostMessage(GetParent(s->parent), WM_COMMAND, ID_AAAVS_OPTIONS, 0);
+                                if (wcscmp(message, L"play-folder") == 0) ::PostMessage(GetParent(s->parent), WM_COMMAND, ID_AAAVS_PLAY_FOLDER, 0);
+                                if (wcsncmp(message, L"display:", 8) == 0) s->Display(message + 8);
                                 if (wcscmp(message, L"ack") == 0) s->pending = false;
                                 if (wcscmp(message, L"play-pause") == 0) ::PostMessage(GetParent(s->parent), WM_COMMAND, ID_PLAY_PLAYPAUSE, 0);
                                 if (wcscmp(message, L"fullscreen") == 0) ::PostMessage(GetParent(s->parent), WM_COMMAND, ID_VIEW_FULLSCREEN, 0);
@@ -244,6 +318,7 @@ void AAAVSView::Tick(HWND parent, bool visible, bool playing, LONGLONG position)
         if (FAILED(hr)) s->InitializationFailed();
     }
     if (!s->controller) return;
+    ShowWindow(s->host, visible && !s->failed ? SW_SHOWNOACTIVATE : SW_HIDE);
     s->controller->put_IsVisible(visible && !s->failed);
     if (!s->ready) return;
     if (s->pending && GetTickCount64() - s->sent < 1000) return;
@@ -254,7 +329,10 @@ void AAAVSView::Tick(HWND parent, bool visible, bool playing, LONGLONG position)
     json.precision(10);
     json << L"{\"type\":\"audio\",\"playing\":" << (visible && playing ? L"true" : L"false")
          << L",\"visible\":" << (visible ? L"true" : L"false")
-         << L",\"position\":" << position / 10000000.0 << L",\"epoch\":" << frame.epoch << L",\"pcm\":[";
+         << L",\"position\":" << position / 10000000.0;
+    // Track length in seconds; omitted when unknown (contract 2.2.4, AUDIO_DURATION_MAX = 86400).
+    if (duration > 0 && duration / 10000000.0 <= 86400.0) json << L",\"duration\":" << duration / 10000000.0;
+    json << L",\"epoch\":" << frame.epoch << L",\"pcm\":[";
     for (size_t i = 0; i < frame.pcm.size(); ++i) { if (i) json << L','; json << (visible && playing ? frame.pcm[i] : 0); }
     json << L"],\"discontinuity\":" << (batch.discontinuity ? L"true" : L"false") << L",\"frames\":[";
     if (visible && playing) for (size_t n = 0; n < batch.count; ++n) {
@@ -273,39 +351,79 @@ void AAAVSView::Tick(HWND parent, bool visible, bool playing, LONGLONG position)
 
 void AAAVSView::Options() {
     if (!Ready()) return;
-    HMENU menu = CreatePopupMenu(), phrases = CreatePopupMenu(), effects = CreatePopupMenu(), durations = CreatePopupMenu(), ratings = CreatePopupMenu();
+    auto& st = *state;
+    HMENU menu = CreatePopupMenu(), phrases = CreatePopupMenu(), styles = CreatePopupMenu(), classic = CreatePopupMenu(), scenes = CreatePopupMenu(), timings = CreatePopupMenu(), includes = CreatePopupMenu();
+    HMENU anchors = CreatePopupMenu(), queues = CreatePopupMenu(), durations = CreatePopupMenu(), ratings = CreatePopupMenu(), qualities = CreatePopupMenu(), resolutions = CreatePopupMenu(), pixels = CreatePopupMenu();
     const int bars[] = {0, 2, 4, 8, 12};
     const wchar_t* phraseNames[] = {L"Adaptive (2-12 bars)", L"2 bars", L"4 bars", L"8 bars", L"12 bars"};
-    for (int i = 0; i < 5; ++i) AppendMenuW(phrases, MF_STRING | (state->bars == bars[i] ? MF_CHECKED : 0), 1 + i, phraseNames[i]);
-    const wchar_t* names[] = {L"Random", L"Cross dissolve", L"L/R Push", L"R/L Push", L"T/B Push", L"B/T Push", L"9 Random Blocks", L"Split L/R Push", L"L/R to Center Push", L"L/R to Center Squeeze", L"L/R Wipe", L"R/L Wipe", L"T/B Wipe", L"B/T Wipe", L"Dot Dissolve", L"Cut"};
-    for (int i = 0; i < 16; ++i) AppendMenuW(effects, MF_STRING | (state->transition == i ? MF_CHECKED : 0), 20 + i, names[i]);
-    const int beats[] = {0, 1, 2, 4};
-    const wchar_t* durationsText[] = {L"Classic (2 seconds)", L"1 beat", L"2 beats", L"4 beats"};
-    for (int i = 0; i < 4; ++i) AppendMenuW(durations, MF_STRING | (state->beats == beats[i] ? MF_CHECKED : 0), 40 + i, durationsText[i]);
-    AppendMenuW(menu, MF_STRING | (state->automatic ? MF_CHECKED : 0), 50, L"Automatic preset switching");
-    const wchar_t* ratingNames[] = {L"All ratings (including unrated)", L"1 star or higher", L"2 stars or higher", L"3 stars or higher", L"4 stars or higher", L"5 stars"};
-    for (int i = 0; i < 6; ++i) AppendMenuW(ratings, MF_STRING | (state->minimumRating == i ? MF_CHECKED : 0), 70 + i, ratingNames[i]);
-    AppendMenuW(menu, MF_POPUP, (UINT_PTR)ratings, L"Shuffle minimum rating");
-    AppendMenuW(menu, MF_POPUP, (UINT_PTR)phrases, L"Phrase length");
-    AppendMenuW(menu, MF_POPUP, (UINT_PTR)effects, L"AVS transition");
-    AppendMenuW(menu, MF_POPUP, (UINT_PTR)durations, L"Transition duration");
+    for (int i = 0; i < 5; ++i) AppendMenuW(phrases, MF_STRING | (st.bars == bars[i] ? MF_CHECKED : 0), 1 + i, phraseNames[i]);
+    // Styles come from the generated table: special selectors first, then the two grouped submenus (IDs 100-132).
+    for (int i = 0; i < kTransitionCount; ++i) {
+        const HMENU target = kTransitionGroup[i] == 0 ? classic : kTransitionGroup[i] == 1 ? scenes : styles;
+        AppendMenuW(target, MF_STRING | (st.transition == i ? MF_CHECKED : 0), kTransitionMenuBase + i, kTransitionNames[i]);
+    }
+    AppendMenuW(styles, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(styles, MF_POPUP, (UINT_PTR)classic, L"Classic AVS styles");
+    AppendMenuW(styles, MF_POPUP, (UINT_PTR)scenes, L"NERV and HUD styles");
+    const wchar_t* timingNames[] = {L"Seconds (uses Fixed duration)", L"Instant", L"1 beat", L"2 beats", L"1 bar", L"2 bars", L"Random"};
+    for (int i = 0; i < 7; ++i) AppendMenuW(timings, MF_STRING | (st.fadeTiming == i ? MF_CHECKED : 0), 80 + i, timingNames[i]);
+    const wchar_t* includeNames[] = {L"Instant", L"1 beat", L"2 beats", L"1 bar", L"2 bars"};
+    for (int i = 0; i < 5; ++i) AppendMenuW(includes, MF_STRING | ((st.fadeRandomSet >> i) & 1 ? MF_CHECKED : 0), 90 + i, includeNames[i]);
+    const wchar_t* anchorNames[] = {L"Scene boundary starts it", L"Scene boundary ends it", L"Scene boundary is the peak"};
+    // The shared host currently starts transitions at the boundary. Preserve stored choices until end/peak scheduling is implemented.
+    for (int i = 0; i < 3; ++i) AppendMenuW(anchors, MF_STRING | (i > 0 ? MF_GRAYED : 0) | (st.fadeAnchor == i ? MF_CHECKED : 0), 95 + i, anchorNames[i]);
+    const wchar_t* queueNames[] = {L"Immediately", L"Next beat", L"Next bar", L"Next phrase"};
+    // Quantized manual changes are deferred; only Immediately is supported by the shared host.
+    for (int i = 0; i < 4; ++i) AppendMenuW(queues, MF_STRING | (i > 0 ? MF_GRAYED : 0) | (st.queueQuantize == i ? MF_CHECKED : 0), 56 + i, queueNames[i]);
     const int milliseconds[] = {250, 500, 1000, 2000, 4000, 8000};
     const wchar_t* fixedNames[] = {L"0.25 seconds", L"0.5 seconds", L"1 second", L"2 seconds", L"4 seconds", L"8 seconds"};
-    for (int i = 0; i < 6; ++i) AppendMenuW(durations, MF_STRING | (!state->beats && state->durationMs == milliseconds[i] ? MF_CHECKED : 0), 60 + i, fixedNames[i]);
-    AppendMenuW(menu, MF_STRING | (state->manualFade ? MF_CHECKED : 0), 52, L"Transitions on manual preset changes");
-    AppendMenuW(menu, MF_STRING | (state->autoFade ? MF_CHECKED : 0), 53, L"Transitions on automatic preset changes");
-    AppendMenuW(menu, MF_STRING | (state->keepOld ? MF_CHECKED : 0), 51, L"Keep outgoing preset animating");
+    for (int i = 0; i < 6; ++i) AppendMenuW(durations, MF_STRING | (st.fadeTiming == 0 && st.durationMs == milliseconds[i] ? MF_CHECKED : 0), 60 + i, fixedNames[i]);
+    const wchar_t* ratingNames[] = {L"All ratings (including unrated)", L"1 star or higher", L"2 stars or higher", L"3 stars or higher", L"4 stars or higher", L"5 stars"};
+    for (int i = 0; i < 6; ++i) AppendMenuW(ratings, MF_STRING | (st.minimumRating == i ? MF_CHECKED : 0), 70 + i, ratingNames[i]);
+    const wchar_t* qualityNames[] = {L"Auto", L"Performance", L"Balanced", L"High", L"Native (up to 4K)"};
+    for (int i = 0; i < 5; ++i) AppendMenuW(qualities, MF_STRING | (st.quality == i ? MF_CHECKED : 0), 200 + i, qualityNames[i]);
+    const wchar_t* resolutionNames[] = {L"Classic", L"Crisp", L"High (experimental)"};
+    for (int i = 0; i < 3; ++i) AppendMenuW(resolutions, MF_STRING | (st.avsResolution == i ? MF_CHECKED : 0), 210 + i, resolutionNames[i]);
+    const wchar_t* pixelNames[] = {L"Auto", L"Integer", L"Smooth"};
+    for (int i = 0; i < 3; ++i) AppendMenuW(pixels, MF_STRING | (st.pixelArt == i ? MF_CHECKED : 0), 220 + i, pixelNames[i]);
+    const wchar_t* fpsNames[] = {L"Show frame rate: off", L"Show frame rate: FPS", L"Show frame rate: FPS and detail"};
+    AppendMenuW(menu, MF_STRING | (st.automatic ? MF_CHECKED : 0), 50, L"Automatic preset switching");
+    AppendMenuW(menu, MF_STRING | (st.showFps ? MF_CHECKED : 0), 54, fpsNames[st.showFps]);
+    AppendMenuW(menu, MF_STRING | (st.timingOverlay ? MF_CHECKED : 0), 55, L"Timing overlay always visible");
+    AppendMenuW(menu, MF_POPUP, (UINT_PTR)ratings, L"Shuffle minimum rating");
+    AppendMenuW(menu, MF_POPUP, (UINT_PTR)phrases, L"Phrase length");
+    AppendMenuW(menu, MF_POPUP, (UINT_PTR)styles, L"Transition style");
+    AppendMenuW(menu, MF_POPUP, (UINT_PTR)timings, L"Transition timing");
+    AppendMenuW(menu, MF_POPUP, (UINT_PTR)includes, L"Random timing includes");
+    AppendMenuW(menu, MF_POPUP, (UINT_PTR)anchors, L"Transition lands");
+    AppendMenuW(menu, MF_POPUP, (UINT_PTR)durations, L"Fixed duration");
+    AppendMenuW(menu, MF_POPUP, (UINT_PTR)queues, L"Manual preset changes take effect");
+    AppendMenuW(menu, MF_STRING | (st.manualFade ? MF_CHECKED : 0), 52, L"Transitions on manual preset changes");
+    AppendMenuW(menu, MF_STRING | (st.autoFade ? MF_CHECKED : 0), 53, L"Transitions on automatic preset changes");
+    AppendMenuW(menu, MF_STRING | (st.keepOld ? MF_CHECKED : 0), 51, L"Keep outgoing preset animating");
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(menu, MF_POPUP, (UINT_PTR)qualities, L"Render quality");
+    AppendMenuW(menu, MF_POPUP, (UINT_PTR)resolutions, L"AVS resolution");
+    AppendMenuW(menu, MF_POPUP, (UINT_PTR)pixels, L"Pixel-art scaling");
     POINT point; GetCursorPos(&point);
-    const UINT choice = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, point.x, point.y, 0, GetParent(state->parent), nullptr);
-    DestroyMenu(menu);
-    if (choice >= 1 && choice <= 5) state->bars = bars[choice - 1];
-    if (choice >= 20 && choice <= 35) state->transition = choice - 20;
-    if (choice >= 40 && choice <= 43) { state->beats = beats[choice - 40]; if (choice == 40) state->durationMs = 2000; }
-    if (choice >= 60 && choice <= 65) { state->beats = 0; state->durationMs = milliseconds[choice - 60]; }
-    if (choice >= 70 && choice <= 75) state->minimumRating = choice - 70;
-    if (choice == 52) state->manualFade = !state->manualFade;
-    if (choice == 53) state->autoFade = !state->autoFade;
-    if (choice == 50) state->automatic = !state->automatic;
-    if (choice == 51) state->keepOld = !state->keepOld;
-    if (choice) state->Settings();
+    const UINT choice = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, point.x, point.y, 0, GetParent(st.parent), nullptr);
+    DestroyMenu(menu);   // also destroys the attached submenus
+    if (choice >= 1 && choice <= 5) st.bars = bars[choice - 1];
+    if (choice >= 100 && choice < 100 + kTransitionCount) st.transition = int(choice) - 100;
+    if (choice >= 80 && choice <= 86) { st.fadeTiming = int(choice) - 80; st.beats = BeatsFromFade(st.fadeTiming); }
+    if (choice >= 90 && choice <= 94) { const int next = st.fadeRandomSet ^ (1 << (choice - 90)); if (next & 31) st.fadeRandomSet = next; }   // never clear the last bit
+    if (choice >= 95 && choice <= 97) st.fadeAnchor = int(choice) - 95;
+    if (choice >= 56 && choice <= 59) st.queueQuantize = int(choice) - 56;
+    if (choice >= 60 && choice <= 65) { st.fadeTiming = 0; st.beats = 0; st.durationMs = milliseconds[choice - 60]; }
+    if (choice >= 70 && choice <= 75) st.minimumRating = choice - 70;
+    if (choice >= 200 && choice <= 204) st.quality = int(choice) - 200;
+    if (choice >= 210 && choice <= 212) st.avsResolution = int(choice) - 210;
+    if (choice >= 220 && choice <= 222) st.pixelArt = int(choice) - 220;
+    if (choice == 54) st.showFps = (st.showFps + 1) % 3;
+    if (choice == 55) st.timingOverlay = st.timingOverlay ? 0 : 1;
+    if (choice == 52) st.manualFade = !st.manualFade;
+    if (choice == 53) st.autoFade = !st.autoFade;
+    if (choice == 50) st.automatic = !st.automatic;
+    if (choice == 51) st.keepOld = !st.keepOld;
+    if (choice) st.Settings();
 }

@@ -146,6 +146,218 @@
     {
       "source": "visualizer/STANDALONE-AGENTS.md",
       "target": "AGENTS.md"
+    },
+    {
+      "source": "visualizer/tools/check-mpc-contract.mjs",
+      "target": "tools/check-mpc-contract.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-render-resolution.mjs",
+      "target": "tools/check-render-resolution.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-render-sizer.mjs",
+      "target": "tools/check-render-sizer.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-fps-meter.mjs",
+      "target": "tools/check-fps-meter.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-timing-label.mjs",
+      "target": "tools/check-timing-label.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-transition-timing.mjs",
+      "target": "tools/check-transition-timing.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-mpc-beat-grid.mjs",
+      "target": "tools/check-mpc-beat-grid.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-mpc-scene-clock-v2.mjs",
+      "target": "tools/check-mpc-scene-clock-v2.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-mpc-timing-tools.mjs",
+      "target": "tools/check-mpc-timing-tools.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-mpc-cue-sheet.mjs",
+      "target": "tools/check-mpc-cue-sheet.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-mpc-auto-v2.mjs",
+      "target": "tools/check-mpc-auto-v2.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-nerv-timing-signals.mjs",
+      "target": "tools/check-nerv-timing-signals.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-mpc-playback-controls.mjs",
+      "target": "tools/check-mpc-playback-controls.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-mpc-transition-fx.mjs",
+      "target": "tools/check-mpc-transition-fx.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-mpc-folders.mjs",
+      "target": "tools/check-mpc-folders.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-mpc-folder-query.mjs",
+      "target": "tools/check-mpc-folder-query.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-mpc-folder-store.mjs",
+      "target": "tools/check-mpc-folder-store.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-mpc-folder-play.mjs",
+      "target": "tools/check-mpc-folder-play.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-hud-signals.mjs",
+      "target": "tools/check-hud-signals.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-preset-categories.mjs",
+      "target": "tools/check-preset-categories.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-host-resolution.mjs",
+      "target": "tools/check-host-resolution.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-host-timing.mjs",
+      "target": "tools/check-host-timing.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-host-transitions.mjs",
+      "target": "tools/check-host-transitions.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-host-folders.mjs",
+      "target": "tools/check-host-folders.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-aaavs-settings-contract.mjs",
+      "target": "tools/check-aaavs-settings-contract.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-hud-manifest.mjs",
+      "target": "tools/check-hud-manifest.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-hud-manifest-roles.mjs",
+      "target": "tools/check-hud-manifest-roles.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-hud-clock.mjs",
+      "target": "tools/check-hud-clock.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-hud-engine.mjs",
+      "target": "tools/check-hud-engine.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-hud-host.mjs",
+      "target": "tools/check-hud-host.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-hud-worker.mjs",
+      "target": "tools/check-hud-worker.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-hud-generator.mjs",
+      "target": "tools/check-hud-generator.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-hud-install.mjs",
+      "target": "tools/check-hud-install.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-preset-taxonomy.mjs",
+      "target": "tools/check-preset-taxonomy.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-classify-presets.mjs",
+      "target": "tools/check-classify-presets.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-hud-kits.mjs",
+      "target": "tools/check-hud-kits.mjs"
+    },
+    {
+      "source": "visualizer/tools/fixtures-folders.mjs",
+      "target": "tools/fixtures-folders.mjs"
+    },
+    {
+      "source": "visualizer/tools/fixtures-hud.mjs",
+      "target": "tools/fixtures-hud.mjs"
+    },
+    {
+      "source": "visualizer/tools/mpc-transition-fx-raster.mjs",
+      "target": "tools/mpc-transition-fx-raster.mjs"
+    },
+    {
+      "source": "visualizer/tools/gen-transition-names.mjs",
+      "target": "tools/gen-transition-names.mjs"
+    },
+    {
+      "source": "visualizer/tools/build-hud-packs.mjs",
+      "target": "tools/build-hud-packs.mjs"
+    },
+    {
+      "source": "visualizer/tools/hud-taxonomy.mjs",
+      "target": "tools/hud-taxonomy.mjs"
+    },
+    {
+      "source": "visualizer/tools/hud-taxonomy.decisions.json",
+      "target": "tools/hud-taxonomy.decisions.json"
+    },
+    {
+      "source": "visualizer/tools/png-lite.mjs",
+      "target": "tools/png-lite.mjs"
+    },
+    {
+      "source": "visualizer/tools/install-hud-presets.mjs",
+      "target": "tools/install-hud-presets.mjs"
+    },
+    {
+      "source": "visualizer/tools/classify-presets.mjs",
+      "target": "tools/classify-presets.mjs"
+    },
+    {
+      "source": "visualizer/tools/run-flash-limiter-check.mjs",
+      "target": "tools/run-flash-limiter-check.mjs"
+    },
+    {
+      "source": "docs/HUD-PACKS.md",
+      "target": "docs/HUD-PACKS.md"
+    },
+    {
+      "source": "visualizer/tools/print-hud-schema.mjs",
+      "target": "tools/print-hud-schema.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-multi-view.mjs",
+      "target": "tools/check-multi-view.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-multi-view-session.mjs",
+      "target": "tools/check-multi-view-session.mjs"
+    },
+    {
+      "source": "visualizer/tools/check-host-multi-view.mjs",
+      "target": "tools/check-host-multi-view.mjs"
+    },
+    {
+      "source": "docs/MULTI-VIEW.md",
+      "target": "docs/MULTI-VIEW.md"
     }
   ],
   "integration": [
@@ -174,6 +386,9 @@
   },
   "scripts": {
     "build:player": "node tools/build-standalone.mjs",
-    "check:player": "tsc --noEmit && node tools/check-mpc-navigation.mjs && node tools/check-mpc-selection.mjs && node tools/check-mpc-auto.mjs && node tools/check-mpc-host.mjs && node tools/check-mpc-audio-batch.mjs && node tools/check-mpc-safety.mjs && node tools/check-mpc-spectrum.mjs && node tools/check-mpc-clock.mjs && node tools/check-mpc-management.mjs && node tools/check-mpc-scene-clock.mjs && node tools/check-nerv-scenes.mjs && node tools/check-nerv-install.mjs && node tools/check-nerv-host.mjs && node tools/check-nerv-worker.mjs && node tools/check-standalone-player.mjs && node tools/check-standalone-library.mjs && node tools/check-standalone-catalog.mjs"
+    "check:player": "tsc --noEmit && node tools/check-mpc-navigation.mjs && node tools/check-mpc-selection.mjs && node tools/check-mpc-auto.mjs && node tools/check-mpc-host.mjs && node tools/check-mpc-audio-batch.mjs && node tools/check-mpc-safety.mjs && node tools/check-mpc-spectrum.mjs && node tools/check-mpc-clock.mjs && node tools/check-mpc-management.mjs && node tools/check-mpc-scene-clock.mjs && node tools/check-nerv-scenes.mjs && node tools/check-nerv-install.mjs && node tools/check-nerv-host.mjs && node tools/check-nerv-worker.mjs && node tools/check-standalone-player.mjs && node tools/check-standalone-library.mjs && node tools/check-standalone-catalog.mjs && node tools/check-mpc-contract.mjs && node tools/check-render-resolution.mjs && node tools/check-render-sizer.mjs && node tools/check-fps-meter.mjs && node tools/check-timing-label.mjs && node tools/check-transition-timing.mjs && node tools/check-mpc-beat-grid.mjs && node tools/check-mpc-scene-clock-v2.mjs && node tools/check-mpc-timing-tools.mjs && node tools/check-mpc-cue-sheet.mjs && node tools/check-mpc-auto-v2.mjs && node tools/check-nerv-timing-signals.mjs && node tools/check-mpc-playback-controls.mjs && node tools/check-mpc-transition-fx.mjs && node tools/check-mpc-folders.mjs && node tools/check-mpc-folder-query.mjs && node tools/check-mpc-folder-store.mjs && node tools/check-mpc-folder-play.mjs && node tools/check-hud-signals.mjs && node tools/check-preset-categories.mjs && node tools/check-host-resolution.mjs && node tools/check-host-timing.mjs && node tools/check-host-transitions.mjs && node tools/check-host-folders.mjs && node tools/check-aaavs-settings-contract.mjs && node tools/check-hud-manifest.mjs && node tools/check-hud-manifest-roles.mjs && node tools/check-hud-clock.mjs && node tools/check-hud-engine.mjs && node tools/check-hud-host.mjs && node tools/check-hud-worker.mjs && node tools/check-hud-generator.mjs && node tools/check-hud-install.mjs && node tools/check-preset-taxonomy.mjs && node tools/check-classify-presets.mjs && node tools/run-flash-limiter-check.mjs && node tools/check-multi-view.mjs && node tools/check-multi-view-session.mjs && node tools/check-host-multi-view.mjs",
+    "build:hud-packs": "node tools/build-hud-packs.mjs --all",
+    "classify:presets": "node tools/classify-presets.mjs",
+    "check:multiview": "node tools/check-multi-view.mjs && node tools/check-multi-view-session.mjs && node tools/check-host-multi-view.mjs"
   }
 }

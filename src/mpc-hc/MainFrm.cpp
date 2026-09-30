@@ -352,8 +352,8 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
     ON_UPDATE_COMMAND_UI(ID_FILE_OPENMEDIA, OnUpdateFileOpen)
     ON_COMMAND(ID_FILE_OPENMEDIA, OnFileOpenmedia)
     ON_UPDATE_COMMAND_UI(ID_FILE_OPENMEDIA, OnUpdateFileOpen)
-    ON_COMMAND_RANGE(ID_AAAVS_PREVIOUS, ID_AAAVS_NOT_WORKING, OnAAAVSPreset)
-    ON_UPDATE_COMMAND_UI_RANGE(ID_AAAVS_PREVIOUS, ID_AAAVS_NOT_WORKING, OnUpdateAAAVSPreset)
+    ON_COMMAND_RANGE(ID_AAAVS_PREVIOUS, ID_AAAVS_PLAY_FOLDER, OnAAAVSPreset)
+    ON_UPDATE_COMMAND_UI_RANGE(ID_AAAVS_PREVIOUS, ID_AAAVS_PLAY_FOLDER, OnUpdateAAAVSPreset)
     ON_WM_COPYDATA()
     ON_COMMAND(ID_FILE_OPENDVDBD, OnFileOpendvd)
     ON_UPDATE_COMMAND_UI(ID_FILE_OPENDVDBD, OnUpdateFileOpen)
@@ -16072,6 +16072,8 @@ void CMainFrame::OpenSetupVideo()
     m_pVW->put_MessageDrain((OAHWND)m_pVideoWnd->m_hWnd);
 
     for (CWnd* pWnd = m_pVideoWnd->GetWindow(GW_CHILD); pWnd; pWnd = pWnd->GetNextWindow()) {
+        // The visualizer's browser is interactive, unlike the video renderer.
+        if (AAAVSView::IsHostWindow(pWnd->GetSafeHwnd())) continue;
         // 1. lets WM_SETCURSOR through (not needed as of now)
         // 2. allows CMouse::CursorOnWindow() to work with m_pVideoWnd
         pWnd->EnableWindow(FALSE);

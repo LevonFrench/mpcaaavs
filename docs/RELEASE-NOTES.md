@@ -17,6 +17,10 @@ This preview combines MPC-HC audio playback with an embedded AAAVS visualizer. T
 
 ## Requirements and limitations
 
+The shared Player and MPC host now support local HUD manifests, a folder browser with per-pack playback defaults, render quality and pixel scaling controls, musical fade timing, and transition styles 16–32. HUD-to-NERV song-clock boundaries cut; other supported scene pairs reconstruct their fades. End/hit anchors and quantized manual queues remain follow-ups. Timing v2 and transition indices 16+ are forward-only: older builds can reject or strip these settings when resaving. Back up personal settings before opening them with an older build.
+
+The local HUD generator covers every supplied source and uses neutral procedural names. Generated banks and real-title overlays are excluded from public artifacts. See [HUD packs](HUD-PACKS.md) for the current source, fidelity and runtime validation boundaries.
+
 Windows x64; installed DirectShow codecs; Microsoft Edge WebView2 Runtime; Microsoft DirectX End-User Runtime. This is a Release Lite preview, not a self-contained codec distribution. Keep the unpacked folder writable for ratings and setup saves.
 
 Native compilation and CPU tests cover audio handoff, tempo/phrase scheduling, navigation, transitions, catalog validation, storage rollback, setup persistence, scene timing, and worker lifecycle. They do not establish live audio latency, every legacy preset's fidelity, browser focus, DPI/fullscreen behavior, or GPU performance. Complete the live checks in the [release guide](RELEASING.md) before promoting a candidate to a general release.

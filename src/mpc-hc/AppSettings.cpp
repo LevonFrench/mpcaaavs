@@ -612,6 +612,7 @@ static constexpr wmcmd_base default_wmcmds[] = {
     { ID_AAAVS_RATE_DOWN, VK_F6, 0, ID_AAAVS_RATE_DOWN },
     { ID_AAAVS_RATE_UP, VK_F7, 0, ID_AAAVS_RATE_UP },
     { ID_AAAVS_NOT_WORKING, VK_F8, 0, ID_AAAVS_NOT_WORKING },
+    { ID_AAAVS_PLAY_FOLDER, VK_F8, FCONTROL, ID_AAAVS_PLAY_FOLDER },
     { ID_PLAY_PLAYPAUSE,             VK_SPACE, 0,                 IDS_AG_PLAYPAUSE,   APPCOMMAND_MEDIA_PLAY_PAUSE, wmcmd::LUP },
     { ID_PLAY_PLAY,                         0, 0,                 IDS_AG_PLAY,        APPCOMMAND_MEDIA_PLAY },
     { ID_PLAY_PAUSE,                        0, 0,                 IDS_AG_PAUSE,       APPCOMMAND_MEDIA_PAUSE },

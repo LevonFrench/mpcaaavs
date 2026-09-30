@@ -98,8 +98,18 @@ export class FlashGate {
   }
 }
 
-/** Default sampler: one reused OffscreenCanvas; null where OffscreenCanvas 2D is unavailable. */
-export function canvasProbeSampler(): FlashProbeSampler {
+/**
+ * Default sampler: one reused OffscreenCanvas; null where OffscreenCanvas 2D is unavailable.
+ *
+ * `smoothingQuality` sets `imageSmoothingQuality` on the probe context. Unset (the default, and what the Studio uses) the context keeps
+ * its own default, so the probe is exactly what it always was. The MPC host passes 'medium': a source presented at device resolution is
+ * reduced 7.5x (1080p) to 15x (4K) into the 256x144 probe, and the default four-tap bilinear can alias fine strobing away, which is a
+ * photosensitivity matter (docs/design/RESOLUTION-PIPELINE.md 5.8 and CONTRACT 5.3 item 1). Whether the limiter decision holds at those
+ * sizes is checked on a display later; nothing here has been seen running.
+ */
+export function canvasProbeSampler(options: { smoothingQuality?: ImageSmoothingQuality } = {}): FlashProbeSampler {
+  const quality = options?.smoothingQuality;
+  const smoothingQuality = quality === 'low' || quality === 'medium' || quality === 'high' ? quality : undefined;
   let context: OffscreenCanvasRenderingContext2D | null = null;
   let failed = false;
   return (source) => {
@@ -109,6 +119,7 @@ export function canvasProbeSampler(): FlashProbeSampler {
       context = new OffscreenCanvas(PROBE_W, PROBE_H).getContext('2d', { alpha: false });
       if (!context) { failed = true; return null; }
       context.imageSmoothingEnabled = true;
+      if (smoothingQuality) context.imageSmoothingQuality = smoothingQuality;
     }
     try {
       context.drawImage(source, 0, 0, PROBE_W, PROBE_H);

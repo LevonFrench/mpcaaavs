@@ -52,8 +52,13 @@ ipch
 /.public-check/
 /.npm-cache/
 /.tmp/
+/.wiki/
 /dependencies-restore.log
 /releases/
 /distrib/MPCVR/
 /distrib/x64/MediaInfo.dll
 /distrib/x86/MediaInfo.dll
+# Generated HUD preset packs (derived locally from private reference material). Kept out of git, the mirror and the release until the owner approves
+# publication; remove this line then (docs/design/CONTRACT.md C-28, Q30).
+/visualizer/hud-presets/
+/visualizer/hud-presets.private/

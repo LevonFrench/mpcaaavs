@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 const bundle=await build({entryPoints:['src/mpc-host.ts'],bundle:true,format:'esm',write:false,define:{'import.meta.url':'"https://aaavs.invalid/dist/mpc-host.js"'},plugins:[{name:'selection-fixture',setup(b){
   b.onResolve({filter:/(local-collection|mpc-management|mpc-bitmap-dependencies|mpc-auto-director)\.ts$/},args=>({path:args.path,namespace:'fixture'}));
   b.onLoad({filter:/.*/,namespace:'fixture'},args=>({contents:args.path.includes('local-collection')
-    ?`export async function fetchLocalAvsCatalog(){return globalThis.selectionCatalog;} export function fetchLocalAvsPreset(p){return globalThis.selectionFetch(p);}`
+    ?`export async function fetchLocalAvsCatalog(){return globalThis.selectionCatalog;} export function fetchLocalAvsPreset(p){return globalThis.selectionFetch(p);} export function isSceneKind(p){return p?.kind==='nerv'||p?.kind==='hud'} export async function fetchLocalAvsSources(){return new Map()}`
     :args.path.includes('management')?`export class PresetManagement {open=false;constructor(a){globalThis.selectionActions=a;}refresh(){}show(){}receive(){}}`
     :args.path.includes('auto-director')?`export class MpcAutoDirector {enabled=true;bars=0;energy=1;tempo={locked:true,bpm:120};remainingBars=1;reset(){}rearm(){}configure(enabled,bars){this.enabled=enabled;this.bars=bars??0;}update(){const action=globalThis.selectionAutoAction;globalThis.selectionAutoAction={prepare:false,switch:false};return this.enabled?action:{prepare:false,switch:false};}}`
     :`export async function loadPresetBitmaps(){return [];}`}));
@@ -17,9 +17,9 @@ let instance=0;
 async function harness(nerv=false){
   const catalog=scenes.map((scene,index)=>({name:`Preset ${index}`,sha256:index.toString(16).padStart(64,'0'),fileName:`${index}.avs`,autoEligible:index!==7,rating:Math.min(index,5),notWorking:index===6,...(nerv?{kind:'nerv',scene}:{kind:'avs'})}));
   const nodes=new Map(),posted=[],workers=[],fetches=[];let listener,raf,pagehide,now=0;
-  const ctx={globalAlpha:1,drawImage(){},getImageData(){return {data:new Uint8ClampedArray(256*144*4)};},save(){},restore(){},beginPath(){},rect(){},clip(){},fillRect(){},createPattern(){return {};}};
+  const ctx={clearRect(){},setTransform(){},globalAlpha:1,drawImage(){},getImageData(){return {data:new Uint8ClampedArray(256*144*4)};},save(){},restore(){},beginPath(){},rect(){},clip(){},fillRect(){},createPattern(){return {};}};
   const canvas=()=>({width:640,height:360,clientWidth:640,clientHeight:360,getContext(){return {...ctx,canvas:this};}});
-  globalThis.selectionCatalog=catalog;globalThis.selectionAutoAction={prepare:false,switch:false};
+  globalThis.fetch=async()=>{throw Error('offline fixture')};globalThis.selectionCatalog=catalog;globalThis.selectionAutoAction={prepare:false,switch:false};
   globalThis.selectionFetch=p=>new Promise((resolve,reject)=>fetches.push({p,resolved:false,resolve(){this.resolved=true;resolve(new Uint8Array([parseInt(p.sha256,16)+1,0,0,0]));},reject}));
   globalThis.OffscreenCanvas=class {constructor(){Object.assign(this,canvas());}};
   globalThis.document={hidden:false,baseURI:'https://aaavs.invalid/mpc.html',body:{append(){},classList:{add(){},remove(){}}},createElement:canvas,querySelector(id){if(!nodes.has(id))nodes.set(id,id==='#visualizer'?canvas():{textContent:''});return nodes.get(id);},addEventListener(){}};
