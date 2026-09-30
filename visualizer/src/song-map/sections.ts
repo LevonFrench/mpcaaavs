@@ -22,6 +22,8 @@ export interface SectionInput {
   readonly specStride: number;
   readonly chromaOffset: number;
   readonly downbeatConfidence: number;
+  /** Beats between two downbeats (default 4); only scales the per-beat drum rates. */
+  readonly beatsPerBar?: number;
   /** Bass pitch per frame (MIDI, 0 = unvoiced). Optional: without it low-end presence falls back to the bass band level. */
   readonly bassMidi?: Float32Array;
   /** Track length in frames, or null while it is unknown (live scan). An island that ends earlier never gets an 'outro'. */
@@ -64,7 +66,7 @@ function bars(input: SectionInput, a: number, b: number): Bar[] {
       for (let f = f0; f < f1; f++) s += x[f]!;
       v[k] = s / (f1 - f0);
     }
-    const beats = Math.max(.25, 4 * (end - start) / period);
+    const beats = Math.max(.25, (input.beatsPerBar ?? 4) * (end - start) / period);
     const kick = countIn(input.kicks, start, end) / beats, snare = countIn(input.snares, start, end) / beats, hat = countIn(input.hats, start, end) / beats;
     v[DENSE.length] = Math.min(2, kick); v[DENSE.length + 1] = Math.min(2, snare); v[DENSE.length + 2] = Math.min(4, hat) / 2;
     for (let c = 0; c < 12; c++) {

@@ -25,7 +25,8 @@ export interface SongMapJSON {
   spectrum?: { frames: number; mel: number; chroma: number; fmin: number; fmax: number };
   /** Interleaved peak-normalized stereo in SongMapBinary.wave. */
   wave?: { rate: number; channels: number; frames: number };
-  confidence: { tempo: number; downbeat: number; sections: number };
+  /** `meter` (optional, 0..1): how decisive the 3-or-4 beats-per-bar estimate was (absent on maps from older analyzers and on live maps). */
+  confidence: { tempo: number; downbeat: number; sections: number; meter?: number };
   /** Features estimated without stem separation, e.g. 'vocal', 'drums'. */
   approximations: string[];
 }
