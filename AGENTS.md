@@ -100,5 +100,7 @@ banks, title overlays, history and personal configuration.
 - Visual work is judged by looking. Render stills or contact sheets at 1080p
   (and 4K for sharpness), compare them with the reference frames, and look at
   them before claiming progress. Passing CPU checks is not visual acceptance.
+- Performance claims need numbers from `visualizer/tools/bench-shows.mjs` (per-stage timing, A/B with `--compare`); `docs/PERFORMANCE.md` explains the
+  instrumentation, the baseline and what a software-GL run cannot tell you. Stage timing is off by default and must never change a rendered pixel.
 - Report proposed features, CPU checks, builds, rendered stills and the owner's
   live acceptance as separate states. Never claim what was not observed.

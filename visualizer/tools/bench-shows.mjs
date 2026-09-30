@@ -83,7 +83,7 @@ const { summarize, histogram, roundSummary, validateTrace, FRAME_HISTOGRAM_EDGES
 
 if (opt('merge')) {
   const parts = opt('merge').split(',').map((f) => JSON.parse(readFileSync(resolve(f), 'utf8')));
-  const merged = { ...parts[0], created: new Date().toISOString(), merged: opt('merge').split(',').map((f) => relative(process.cwd(), resolve(f))), results: parts.flatMap((p) => p.results) };
+  const merged = { ...parts[0], created: new Date().toISOString(), notes: [...new Set(parts.flatMap((p) => p.notes ?? []))], sourceOptions: parts.map((p) => p.options), merged: opt('merge').split(',').map((f) => f.split(/[\\/]/).pop()), results: parts.flatMap((p) => p.results) };
   if (OUT) { writeFileSync(OUT, formatJson(merged)); log(`merged ${merged.results.length} results -> ${OUT}`); }
   report(merged.results);
   process.exit(0);
@@ -298,7 +298,7 @@ function multiviewReal(side, task, runs) {
     kind: 'multiview-real', side: side.name, stagesMode: 'off', name: task.name, size: task.size, scale: 1, count: task.count, panes, info: runs[0].info, surface: runs[0].surface ? runs[0].surface.join('x') : null,
     frames: presentCount, seconds: r2(seconds), effectiveFps: r2(presentCount / Math.max(0.001, seconds)), paneFps: r2(panes.reduce((a, p) => a + p.fps, 0)),
     overBudget: over, overBudgetPct: r2(100 * over / Math.max(1, frameMs.length)),
-    total: summary(allRtt), main: summary(frameMs), present: summary(presents), frameAge: summary(ages), raf: summary(raf),
+    total: summary(allRtt), main: summary(frameMs), mainSplit: { runtimeTick: summary(runs.flatMap((r) => r.split.tick)), images: summary(runs.flatMap((r) => r.split.images)), composite: summary(runs.flatMap((r) => r.split.compose)) }, present: summary(presents), frameAge: summary(ages), raf: summary(raf),
     histogram: { edges: [...FRAME_HISTOGRAM_EDGES], counts: histogram(frameMs, FRAME_HISTOGRAM_EDGES) }, trace,
     note: 'Real MultiViewSession with its Canvas2D NERV workers (the show engine is not used by Multiview). total = pane request to bitmap; main = tick + composite on the main thread per display tick; paneFps = sum over panes.',
   };

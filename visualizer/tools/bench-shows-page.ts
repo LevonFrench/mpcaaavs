@@ -242,7 +242,7 @@ async function runMultiview(o) {
       if (canvas.width !== 1920) canvas.width = 1920;
       ctx.drawImage(surface, 0, 0, 1920, 1080);
       const d = now() - p0;
-      if (complete) { ctx.getImageData(960, 540, 1, 1); if (probe.measuring) completes.push(now() - p0 - d); }
+      if (complete) { ctx.getImageData(960, 540, 1, 1); const c = now() - p0 - d; if (probe.measuring) completes.push(c); }
       surfaceSize = [surface.width, surface.height];
       presentCount++; if (probe.measuring) presents.push(d);
     },
@@ -253,6 +253,10 @@ async function runMultiview(o) {
   const panes = plan.panes.map((p) => ({ ...p, bars: 128, phaseBars: 0, auto: true, shuffle: false, source: null }));
   session.apply({ ...plan, count, layout, panes, source: { kind: 'all-presets' }, gutter: 4, avoidDuplicates: true });
   session.enable(true);
+  // split the main-thread cost of a tick: the runtime's tick (lane clock, render requests, commits) against the compositor's draw
+  const split = { tick: [], compose: [], images: [] };
+  const wrap = (obj, name, bucket) => { const f = obj[name].bind(obj); obj[name] = (...a) => { const t = now(); const r = f(...a); if (probe.measuring) split[bucket].push(now() - t); return r; }; };
+  wrap(session.runtime, 'tick', 'tick'); wrap(session.runtime, 'images', 'images'); wrap(session.compositor, 'draw', 'compose');
   const raf = [], frameMs = [], ages = [];
   let lastRaf = 0, measureFrom = Infinity;
   const ready = () => session.runtime && session.runtime.lanes.slice(0, count).every((l) => l.current?.bitmap);
@@ -266,7 +270,7 @@ async function runMultiview(o) {
       if (!probe.measuring && ready() && n - tStart > warmup * 1000) { probe.measuring = true; measureFrom = n; presents.length = 0; probe.workers.forEach((w) => { w.frames.length = 0; }); }
       const f0 = now();
       session.frame(n);
-      const f1 = now();
+      const f1 = now(); // the whole tick: with completion on it includes the wait for the composite's pixels, which lands in drawImage or in the readback depending on the canvas's mode
       if (probe.measuring) {
         if (pacing === 'raf' && lastRaf) raf.push(ts - lastRaf);
         frameMs.push(f1 - f0);
@@ -289,7 +293,7 @@ async function runMultiview(o) {
   const wall = (now() - measureFrom) / 1000;
   const info = { plates: probe.workers.filter((w) => w.live).map((w) => w.plate), log: log.slice(-6), failed: [...fails] };
   const workers = probe.workers.filter((w) => w.live).map((w) => ({ plate: w.plate, frames: w.frames }));
-  const result = { workers, presents, completes, presentCount, wall, raf, frameMs, ages, surface: surfaceSize, info, gpu: gpuInfo() };
+  const result = { workers, split, presents, completes, presentCount, wall, raf, frameMs, ages, surface: surfaceSize, info, gpu: gpuInfo() };
   session.close();
   return result;
 }

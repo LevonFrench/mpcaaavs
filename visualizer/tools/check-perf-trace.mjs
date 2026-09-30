@@ -207,4 +207,28 @@ for (const c of PERF_COUNTERS) ok(emitted.counter.has(c.name), `counter ${c.name
   for (const o of ['--seconds', '--sizes', '--plates', '--chromium', '--gpu', '--browser-arg', '--headed', '--sync', '--compare', '--out', '--avs-dir', '--multiview']) { ok(benchSrc.includes(o) && doc.includes(o), `bench option ${o} exists and is documented`); }
 }
 
+// ------------------------------------------------------------------ 6. the committed baseline is a valid, small, complete report
+{
+  const text = readFileSync(join(VIS, '..', 'docs/perf/baseline.json'), 'utf8');
+  ok(text.length < 400_000, `baseline.json stays a summary (${text.length} bytes)`);
+  const b = JSON.parse(text);
+  ok(b.format === 'aaavs-bench' && b.version === 1 && Array.isArray(b.results) && b.results.length > 40, 'baseline.json format');
+  ok(b.notes.some((x) => /RELATIVE/.test(x)), 'baseline.json says its numbers are relative (software GL)');
+  const plates = ['boot', 'magi', 'psycho', 'radar', 'harmonics', 'seele', 'battery', 'atfield', 'alert', 'plug', 'target', 'city', 'sync', 'berserk', 'impact', 'end'];
+  for (const r of b.results) {
+    if (r.trace) validateTrace(r.trace);
+    ok(!r.error, `${r.kind} ${r.name}: no error`);
+    if (r.kind === 'plate') ok(r.lit > 0.01 && r.renderer === 'show' && r.frames >= 2, `${r.name} ${r.size}: the show engine drew something (lit ${r.lit})`);
+    if (r.kind === 'plate' || r.kind === 'multiview-show') ok(r.histogram.counts.reduce((x, y) => x + y, 0) === r.frames, `${r.name}: histogram covers every frame`);
+  }
+  for (const size of ['1920x1080', '3840x2160']) for (const p of plates) ok(b.results.some((r) => r.kind === 'plate' && r.name === p && r.size === size && r.stagesMode === 'cpu'), `baseline has ${p} at ${size}`);
+  for (const p of plates) ok(b.results.some((r) => r.kind === 'plate' && r.name === p && r.size === '1920x1080' && r.stagesMode === 'sync'), `baseline has ${p} synchronised at 1080p`);
+  for (const n of [2, 4]) ok(b.results.some((r) => r.kind === 'multiview-real' && r.count === n), `baseline has ${n}-lane Multiview`);
+  ok(b.results.some((r) => r.kind === 'avs'), 'baseline has AVS presets');
+  const idr = JSON.parse(readFileSync(join(VIS, '..', 'docs/perf/identity.json'), 'utf8'));
+  ok(idr.rows.length === 16 && idr.rows.every((r) => r.plainStages === 0 && r.stages[0] > 0 && r.stages[1] > 0), 'the committed identity run covers 16 plates and shows stages only when on');
+  const floor = Math.max(...idr.rows.map((r) => r.noise.max)), worst = Math.max(...idr.rows.map((r) => Math.max(r.cpu.max, r.sync.max)));
+  ok(worst <= floor, `instrumented frames differ from plain ones by no more than the renderer's own noise (${worst} <= ${floor} levels)`);
+}
+
 console.log(`Performance instrumentation contract PASS (${n} assertions): stage catalog and trace format, source/catalog agreement, off by default and reversible, guarded call sites.`);
