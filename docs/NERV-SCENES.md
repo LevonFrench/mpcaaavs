@@ -5,9 +5,11 @@ The public pack contains 16 live-audio presets adapted from the visual vocabular
 Radar, Harmonics, Seele, Battery, AT Field, Alert, Entry Plug, Target, Tokyo-3,
 Sync, Berserk, Impact and End. Each has a different instrument layout; they share
 terminal typography, hazard strips, stereo scopes and a full-band spectrum rail.
-They are Canvas2D scene presets, not AVS binaries or the original Three.js video.
-The upstream MIT notice is preserved in `THIRD-PARTY-NERV.txt`.
-No original music, precomputed song analysis, fonts or logos are included.
+They are scene presets, not AVS binaries. By default they render on the show engine, a port of
+the upstream Three.js engine and its 16 plates (see **Renderer** below). The earlier Canvas2D
+scenes remain as a fallback. The upstream MIT notice is preserved in `THIRD-PARTY-NERV.txt`.
+The show engine bundles the OFL fonts the upstream video uses (`visualizer/show-assets/fonts`,
+licenses in `LICENSES.txt`). No original music, precomputed song analysis or logos are included.
 
 ## Use
 
@@ -46,6 +48,23 @@ the current song position. Turn Auto off to change scenes immediately. Loading a
 legacy AVS preset or one outside the active setup still holds the fixed sequence;
 activate the setup again, or switch Auto off and back on, to resume it. Opening a
 management panel defers scene selection until the panel is closed.
+
+## Renderer
+
+NERV presets render on the show engine (`visualizer/src/show-render.worker.ts`), with WebGL2, HDR
+post-processing and the upstream plates, fonts and bar-timed stories:
+
+- A plate's story is mapped onto its scene window, so it resolves on the scene's last bar. For
+  example, Magi's vote is decided and its countdown reaches zero at the scene change.
+- Until a song analysis exists, the engine reads the live audio frames and the scene clock's beat
+  grid. Kicks, snares and hats that have not been heard yet are predicted on that grid. Bass
+  pitch, vocal onsets and future spectra are unknown in this mode, so they read as silence.
+- Transitions between NERV presets use the same styles and clock as before.
+- The frame is rendered at 1920x1080 and letterboxed into the render size.
+- If the device has no WebGL2, the worker falls back to the Canvas2D scenes by itself.
+- To keep the Canvas2D scenes on a device, set `localStorage["mpcaaavs.nervEngine"] = "legacy"`
+  in the visualizer page, or open it with `?nerv=legacy`.
+- Multiview lanes always use the Canvas2D scenes.
 
 ## Clock and audio contract
 
