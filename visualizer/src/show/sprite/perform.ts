@@ -134,13 +134,13 @@ export class Stage {
         if (!reg) continue;
         const frames = reg.clip ? this.pack.clipFrames(reg.clip) : undefined, clip = reg.clip ? this.pack.clip(reg.clip) : undefined;
         for (let k = 0; k < 3; k++) {
-          // the shot and two fading afterimages 2 and 4 ticks behind it
-          const tk = t - k * 2 / TICK_RATE;
+          // the shot and two fading afterimages 3 and 6 ticks behind it
+          const tk = t - k * 3 / TICK_RATE;
           if (tk < sh.t0) continue;
           const st = motionAt(sh.spec, { beat: au.beatAt(tk), bar: au.songBarAt(tk) });
           const idx = clip && frames ? clipFrameIndex(clip.hold, true, (t - sh.t0) * TICK_RATE) : 0;
           const f = frames?.[idx];
-          if (f) pushFrame(draws, f, st.x, st.y, Math.cos(st.angle) < -0.2, 1, reg.palette, Z_SHOT - k * 0.1, k === 0 ? 'normal' : 'add', k === 0 ? 1 : 0.5 / k, st.clipY ?? undefined);
+          if (f) pushFrame(draws, f, st.x, st.y, Math.cos(st.angle) < -0.2, 1, reg.palette, Z_SHOT - k * 0.1, k === 0 ? 'normal' : 'add', k === 0 ? 1 : 0.4 / k, st.clipY ?? undefined);
           else draws.push({ atlas: reg.atlas, rect: reg.rect, x: Math.round(st.x - reg.anchor[0]), y: Math.round(st.y - reg.anchor[1]), palette: reg.palette, z: Z_SHOT });
         }
       }

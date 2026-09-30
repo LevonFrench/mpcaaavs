@@ -314,7 +314,8 @@ export function choreograph(au: ChoreoAudio, pack: ChoreoPack, plan: StagePlan, 
       const beat0 = au.beatAt(a.event), beat1 = landingBeat(beat0, L.beats);
       const tp = target ?? p, [ox, oy] = pos(p, a.event), [tx, ty] = pos(tp, au.timeOfBeat(beat1));
       const origin: [number, number] = L.origin === 'sky' ? [tx + (hash32(seed, a.id) % 40) - 20, -20] : [ox + face(p) * (rg?.spawn[0] ?? 10), oy - (rg?.spawn[1] ?? 14)];
-      const dest: [number, number] = L.origin === 'floor' ? [tx, ty] : [tx - face(p) * 4, ty - 14];
+      const toFloor = L.origin === 'floor' || L.model === 'fall' || L.model === 'rise';
+      const dest: [number, number] = toFloor ? [tx, ty] : [tx - face(p) * 4, ty - 14];
       const count = L.model === 'spread' ? Math.max(1, L.count ?? 5) : 1;
       const flight = beat1 - beat0;
       for (let i = 0; i < count; i++) {
@@ -335,9 +336,9 @@ export function choreograph(au: ChoreoAudio, pack: ChoreoPack, plan: StagePlan, 
       const ticks = 12;
       script.freezes.push({ t: a.bigTime, ticks, who: '*' });
       const [sx, sy] = pos(p, a.bigTime);
-      script.fx.push({ region: 'flash', x: sx + face(p) * 12, y: sy - 18, t: a.bigTime, scale: 3 });
+      script.fx.push({ region: 'flash', x: sx + face(p) * 12, y: sy - 18, t: a.bigTime, scale: 2 });
       script.fx.push({ region: 'ring', x: sx, y: sy - 14, t: a.bigTime, scale: 2 });
-      script.punches.push({ t: a.bigTime, kind: 'super', shake: 6, zoom: 1.08, flash: 0.55, ticks });
+      script.punches.push({ t: a.bigTime, kind: 'super', shake: 6, zoom: 1.06, flash: 0.32, ticks });
     }
   }
 

@@ -135,7 +135,7 @@ function drawFigure(pose: Pose, s: number, horns: boolean): Drawn {
   c.disc(hx, hy, r, SKIN);
   for (let j = Math.floor(hy - r); j <= Math.ceil(hy - 1.5 * s); j++) for (let i = Math.floor(hx - r); i <= Math.ceil(hx + r); i++) if (c.get(i, j) === SKIN && (j < hy - 1.5 * s || i < hx - 2 * s)) c.px(i, j, HAIR);
   if (pose.hurt) c.line(hx + s, hy, hx + 3.5 * s, hy, OUT, Math.max(1, s)); else { c.rect(Math.round(hx + s), Math.round(hy - s), 2 * s, 2 * s, EYE); c.px(hx + 3 * s - 1, hy, OUT); }
-  if (horns) { c.line(hx - 3 * s, hy - 4 * s, hx - 5 * s, hy - 9 * s, BLADE2, 2 * s); c.line(hx + 3 * s, hy - 4 * s, hx + 5 * s, hy - 9 * s, BLADE2, 2 * s); }
+  if (horns) { c.line(hx - 3 * s, hy - 4 * s, hx - 7 * s, hy - 7 * s, ACC, 2 * s); c.line(hx + 3 * s, hy - 4 * s, hx + 7 * s, hy - 7 * s, ACC, 2 * s); c.px(hx - 7 * s, hy - 7 * s, ACC2); c.px(hx + 7 * s, hy - 7 * s, ACC2); }
   // front arm and hand
   const hand = limb(shF, pose.fa, BODY);
   c.disc(hand[0], hand[1], 1.6 * s, SKIN);

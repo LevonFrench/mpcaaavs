@@ -51,7 +51,7 @@ export function barsLeft(h: HudContext): number { return Math.max(0, Math.ceil(h
 export function energyBar(h: HudContext, x: number, y: number, w: number, label: string, level: (t: number) => number, fill: RGB, rtl = false, labelTint: RGB = INK): SpriteDraw[] {
   const { value, ghost } = ghostLevel(level, h.t);
   return [
-    ...ghostBar(h.pack, x, y + 9, w, 9, value, ghost, { fill, ghost: lin('#ffffff', 0.9), pitch: 0, frame: 'bar-frame', rtl }),
+    ...ghostBar(h.pack, x, y + 9, w, 9, value, ghost, { fill, ghost: lin('#ff6a2a', 1.1), pitch: 0, frame: 'bar-frame', rtl }),
     ...text(h.pack, 'caps', label, rtl ? x + w : x, y, { align: rtl ? 'right' : 'left', tint: labelTint, z: 960 }),
   ];
 }

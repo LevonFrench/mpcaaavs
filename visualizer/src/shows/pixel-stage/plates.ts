@@ -5,8 +5,10 @@ import type { PerformerSpec, StagePlan } from '../../show/sprite/choreo.ts';
 import { makeSpritePlate, type HudContext, type PlateSpec } from '../../show/sprite/scene.ts';
 import type { BorderTheme } from '../../show/sprite/present.ts';
 import { pushFrame, type SpriteDraw } from '../../show/sprite/perform.ts';
+import { motionAt } from '../../show/sprite/motion.ts';
 import { clipFrameIndex } from '../../asset-packs/pack.ts';
 import { PIXEL_STAGE_NAMES, type PixelStagePlateId } from './show-def.ts';
+import { textWidth } from '../../show/sprite/hud.ts';
 import { band, banner, barsLeft, box, chargeMeter, clamp01, counterText, countOnsets, COOL, DIM, eq, energyBar, GOOD, header, HOT, INK, lamps, lin, portrait, ROSE, solid, text, ticker, segmentedMeter } from './kit.ts';
 
 const BANNERS = { intro: 'INTRO', groove: 'GROOVE', break: 'BREAK', build: 'BUILD', drop: 'DROP', breakdown: 'BREAKDOWN', outro: 'OUTRO' } as const;
@@ -38,7 +40,7 @@ const DUEL_FLOOR = 172;
 const duel: PlateSpec = {
   id: 'duel', native: [256, 224], border: theme('#1a0a2a', '#7a1f6a', '#ffb43a', 'stripes'), bg: [0.01, 0.01, 0.02],
   backdrop: { layers: floorLayers(DUEL_FLOOR, 'dusk'), barsPerScreen: 4 },
-  plan: { phraseBars: 2, banners: BANNERS, performers: [fighter('hero', 'hero', 74, 198, 'right', 'A', 'rival'), fighter('rival', 'rival', 182, 198, 'left', 'B', 'hero', { beatOffset: 1 })] },
+  plan: { phraseBars: 2, banners: BANNERS, performers: [fighter('hero', 'hero', 74, 190, 'right', 'A', 'rival'), fighter('rival', 'rival', 182, 190, 'left', 'B', 'hero', { beatOffset: 1 })] },
   dressing: (h) => lamps(h, DUEL_FLOOR + 10, 88, 'dusk', 4),
   hud: (h) => {
     const w = h.nativeW, H = h.nativeH, kicks = countOnsets(h.au.onsets, 'kick', h.start, h.t), snares = countOnsets(h.au.onsets, 'snare', h.start, h.t);
@@ -48,11 +50,11 @@ const duel: PlateSpec = {
       ...energyBar(h, w - 102, 18, 96, 'RIVAL', (t) => Math.max(0.12, Math.min(1, (h.au.env('mid', t) + h.au.env('high', t)) * 0.9)), ROSE, true),
       ...box(h.pack, 'panel', w / 2 - 15, 20, 30, 20, 960),
       ...text(h.pack, 'caps', 'BAR', w / 2, 23, { align: 'center', tint: DIM, z: 970 }),
-      ...text(h.pack, 'caps', counterText(barsLeft(h), 2), w / 2, 31, { align: 'center', tint: HOT, z: 970 }),
-      ...text(h.pack, 'caps', counterText(kicks, 5), 8, 40, { tint: INK, z: 960 }), ...text(h.pack, 'caps', counterText(snares, 5), w - 8, 40, { align: 'right', tint: INK, z: 960 }),
-      ...chargeMeter(h, 38, H - 40, 26, clamp01(1.06 * h.section.p + 0.05 * band(h, 'rms')), 7),
-      ...text(h.pack, 'caps', 'SUPER', 8, H - 39, { tint: HOT, z: 960 }),
-      ...eq(h, 60, H - 62, 20, 16, 3, 1),
+      ...text(h.pack, 'digits', counterText(barsLeft(h), 2), w / 2, 31, { align: 'center', tint: HOT, z: 970 }),
+      ...text(h.pack, 'digits', counterText(kicks, 5), 8, 40, { tint: INK, z: 960 }), ...text(h.pack, 'digits', counterText(snares, 5), w - 8, 40, { align: 'right', tint: INK, z: 960 }),
+      ...chargeMeter(h, 40, H - 24, 26, clamp01(1.06 * h.section.p + 0.05 * band(h, 'rms')), 7),
+      ...text(h.pack, 'caps', 'SUPER', 8, H - 23, { tint: HOT, z: 960 }),
+      ...eq(h, 70, 52, 28, 22, 3, 1),
       ...ticker(h, H - 12), ...banners(h, w / 2, 76, 2),
     ];
   },
@@ -86,10 +88,10 @@ const march: PlateSpec = {
     return [
       ...header(h, INK, COOL),
       ...energyBar(h, 6, 18, 120, 'ENERGY', (t) => band(h, 'rms', t), GOOD),
-      ...text(h.pack, 'caps', 'DIST', w - 70, 19, { tint: DIM, z: 960 }), ...text(h.pack, 'caps', counterText(Math.floor(h.bar) * 12, 5), w - 6, 19, { align: 'right', tint: HOT, z: 960 }),
-      ...text(h.pack, 'caps', 'NEXT', w - 70, 29, { tint: DIM, z: 960 }), ...text(h.pack, 'caps', `${counterText(barsLeft(h), 2)} BARS`, w - 6, 29, { align: 'right', tint: INK, z: 960 }),
+      ...text(h.pack, 'caps', 'DIST', w - 96, 19, { tint: DIM, z: 960 }), ...text(h.pack, 'digits', counterText(Math.floor(h.bar) * 12, 5), w - 6, 19, { align: 'right', tint: HOT, z: 960 }),
+      ...text(h.pack, 'caps', 'NEXT', w - 96, 29, { tint: DIM, z: 960 }), ...text(h.pack, 'caps', `${counterText(barsLeft(h), 2)} BARS`, w - 6, 29, { align: 'right', tint: INK, z: 960 }),
       ...chargeMeter(h, 8, H - 34, 28, clamp01(0.1 + 0.9 * h.section.p), 7, lin('#2affd0', 1.2), lin('#ffd02a', 1.4)),
-      ...eq(h, w - 100, H - 58, 24, 22, 3, 1, COOL, GOOD),
+      ...eq(h, 150, 22, 24, 22, 3, 1, COOL, GOOD),
       ...ticker(h, H - 12), ...banners(h, w / 2, 64, 2),
     ];
   },
@@ -102,14 +104,14 @@ const charge: PlateSpec = {
   backdrop: { layers: floorLayers(CHARGE_FLOOR, 'neon'), barsPerScreen: 4 },
   plan: {
     phraseBars: 2, banners: BANNERS, performers: [
-      { id: 'hero', actor: 'hero', x: 76, y: 150, facing: 'right', base: 'idle', lanes: [
+      { id: 'hero', actor: 'hero', x: 76, y: 140, facing: 'right', base: 'idle', lanes: [
         { source: 'kick', verbs: ['cast'], target: 'boss', launch: { region: 'orb', model: 'homing', beats: 2 }, fx: 'spark', reaction: 'guard', minStrength: 0.3, maxPerBar: 2, hitstop: false },
-        { source: 'hat', verbs: ['swing'], pick: [3, 0], minStrength: 0.2, maxPerBar: 1, fx: 'spark', reach: 22, target: 'boss', reaction: 'none' },
+        { source: 'hat', verbs: ['throw'], pick: [3, 0], minStrength: 0.2, maxPerBar: 1, target: 'boss', launch: { region: 'star', model: 'boomerang', beats: 2, amp: 10 }, hitstop: false },
       ] },
-      { id: 'ally', actor: 'ally', x: 36, y: 150, facing: 'right', base: 'idle', beatOffset: 0.5, lanes: [{ source: 'downbeat', verbs: ['taunt', 'pose'], hitstop: false }] },
-      { id: 'boss', actor: 'boss', x: 270, y: 150, facing: 'left', base: 'idle', hover: 3, path: (u) => [lerp(318, 226, ease(u)), 150], lanes: [
+      { id: 'ally', actor: 'ally', x: 36, y: 142, facing: 'right', base: 'idle', beatOffset: 0.5, lanes: [{ source: 'downbeat', verbs: ['taunt', 'pose'], hitstop: false }] },
+      { id: 'boss', actor: 'boss', x: 270, y: 150, facing: 'left', base: 'idle', hover: 3, path: (u) => [lerp(318, 226, ease(u)), 144], lanes: [
         { source: 'snare', verbs: ['guard'], maxPerBar: 1, reaction: 'none' },
-        { source: 'downbeat', verbs: ['taunt'], every: 2, hitstop: false },
+        { source: 'kick', verbs: ['cast'], pick: [3, 1], minStrength: 0.4, maxPerBar: 1, target: 'hero', launch: { region: 'orb', model: 'rise', beats: 1, origin: 'floor', amp: 22 }, fx: 'spark', reaction: 'none', hitstop: false },
       ] },
     ],
   },
@@ -121,10 +123,10 @@ const charge: PlateSpec = {
       ...energyBar(h, w - 94, 18, 88, 'BOSS', (t) => clamp01(lerp(1, 0.18, (t - h.start) / (h.end - h.start)) * (0.92 + 0.08 * h.au.hit('kick', t, 0.12))), ROSE, true),
       ...box(h.pack, 'panel', w / 2 - 26, 22, 52, 40, 960),
       ...text(h.pack, 'caps', 'DROP IN', w / 2, 26, { align: 'center', tint: DIM, z: 970 }),
-      ...text(h.pack, 'caps', counterText(left, 1), w / 2, 37, { align: 'center', scale: 3, tint: left <= 1 ? lin('#ff5a3a', 1.6) : HOT, z: 970 }),
-      ...chargeMeter(h, 10, H - 34, 42, lv, 8),
-      ...text(h.pack, 'caps', 'CHARGE', 10, H - 46, { tint: HOT, z: 960 }), ...text(h.pack, 'caps', `${counterText(Math.round(lv * 100), 3)}%`, w - 10, H - 46, { align: 'right', tint: INK, z: 960 }),
-      ...eq(h, w - 62, 70, 14, 28, 3, 1, ROSE, COOL), ...ticker(h, H - 12), ...banners(h, w / 2, 84, 2),
+      ...text(h.pack, 'digits', counterText(left, 1), w / 2, 37, { align: 'center', scale: 3, tint: left <= 1 ? lin('#ff5a3a', 1.6) : HOT, z: 970 }),
+      ...chargeMeter(h, 10, H - 26, 42, lv, 8),
+      ...text(h.pack, 'caps', 'CHARGE', 10, H - 36, { tint: HOT, z: 960 }), ...text(h.pack, 'caps', `${counterText(Math.round(lv * 100), 3)}%`, w - 10, H - 36, { align: 'right', tint: INK, z: 960 }),
+      ...eq(h, 8, 54, 26, 26, 3, 1, ROSE, COOL), ...ticker(h, H - 12), ...banners(h, w / 2, 84, 2),
     ];
   },
 };
@@ -136,19 +138,20 @@ const finale: PlateSpec = {
   backdrop: { layers: floorLayers(FINALE_FLOOR, 'neon'), barsPerScreen: 2 },
   plan: {
     phraseBars: 2, banners: BANNERS, performers: [
-      { id: 'hero', actor: 'hero', x: 96, y: 178, facing: 'right', base: 'idle', lanes: [
+      { id: 'hero', actor: 'hero', x: 96, y: 172, facing: 'right', base: 'idle', lanes: [
         { source: 'drop', verbs: ['super'], screenwide: true },
         { source: 'kick', verbs: ['attack', 'special'], pick: [2, 0], target: 'boss', fx: 'spark', reach: 30, reaction: 'none', minStrength: 0.3, maxPerBar: 2 },
         { source: 'hat', verbs: ['throw'], pick: [3, 0], minStrength: 0.15, maxPerBar: 1, target: 'boss', launch: { region: 'bolt', model: 'swoop', beats: 2, origin: 'sky' }, fx: 'spark', reaction: 'none', hitstop: false },
       ] },
-      { id: 'rival', actor: 'rival', x: 52, y: 184, facing: 'right', base: 'idle', beatOffset: 0.5, lanes: [
+      { id: 'rival', actor: 'rival', x: 52, y: 176, facing: 'right', base: 'idle', beatOffset: 0.5, lanes: [
         { source: 'kick', verbs: ['cast'], pick: [2, 1], target: 'boss', launch: { region: 'star', model: 'spread', beats: 2, count: 5 }, fx: 'spark', reaction: 'none', minStrength: 0.3, maxPerBar: 2, hitstop: false },
       ] },
-      { id: 'ally', actor: 'ally', x: 150, y: 186, facing: 'right', base: 'idle', lanes: [
+      { id: 'ally', actor: 'ally', x: 150, y: 178, facing: 'right', base: 'idle', lanes: [
         { source: 'downbeat', verbs: ['cast'], every: 2, launch: { region: 'orb', model: 'orbit', beats: 8, amp: 18 }, hitstop: false },
         { source: 'snare', verbs: ['parry'], pick: [2, 0], reaction: 'none', maxPerBar: 1 },
+        { source: 'hat', verbs: ['throw'], pick: [4, 1], minStrength: 0.15, maxPerBar: 1, target: 'boss', launch: { region: 'star', model: 'fall', beats: 2, origin: 'sky' }, fx: 'puff', reaction: 'none', hitstop: false },
       ] },
-      { id: 'boss', actor: 'boss', x: 300, y: 170, facing: 'left', base: 'idle', hover: 4, lanes: [
+      { id: 'boss', actor: 'boss', x: 300, y: 172, facing: 'left', base: 'idle', hover: 4, lanes: [
         { source: 'snare', verbs: ['guard', 'hurt'], maxPerBar: 2, reaction: 'none' },
         { source: 'downbeat', verbs: ['special', 'taunt'], every: 2, offset: 1, hitstop: false },
       ] },
@@ -160,11 +163,11 @@ const finale: PlateSpec = {
     return [
       ...header(h, INK, lin('#ff5a3a', 1.5)),
       ...energyBar(h, 6, 18, 160, 'BOSS', (t) => clamp01(lerp(1, 0.2, (t - h.start) / (h.end - h.start)) * (0.9 + 0.1 * h.au.hit('kick', t, 0.12))), ROSE, false),
-      ...text(h.pack, 'caps', 'COMBO', w - 6, 19, { align: 'right', tint: DIM, z: 960 }), ...text(h.pack, 'caps', counterText(combo, 4), w - 6, 29, { align: 'right', scale: 2, tint: HOT, z: 960 }),
+      ...text(h.pack, 'caps', 'COMBO', w - 6, 19, { align: 'right', tint: DIM, z: 960 }), ...text(h.pack, 'digits', counterText(combo, 4), w - 6, 29, { align: 'right', scale: 2, tint: HOT, z: 960 }),
       ...energyBar(h, 6, 44, 96, 'HERO', (t) => band(h, 'low', t), COOL),
-      ...segmentedMeter(h.pack, 10, H - 34, 36, 8, clamp01(1.06 * h.section.p + 0.1 * band(h, 'rms')), h.beat, { low: lin('#ff5a1a', 1.2), high: lin('#fff3a0', 1.6), segW: 6, gap: 1, frame: 'panel', label: { font: 'caps', tint: HOT } }),
-      ...text(h.pack, 'caps', 'SUPER', 10, H - 46, { tint: HOT, z: 960 }),
-      ...eq(h, w - 84, H - 60, 20, 26, 3, 1, lin('#ffd23f', 1.3), ROSE), ...ticker(h, H - 12), ...banners(h, w / 2, 80, 3),
+      ...segmentedMeter(h.pack, 10, H - 28, 36, 8, clamp01(1.06 * h.section.p + 0.1 * band(h, 'rms')), h.beat, { low: lin('#ff5a1a', 1.2), high: lin('#fff3a0', 1.6), segW: 6, gap: 1, frame: 'panel', label: { font: 'caps', tint: HOT } }),
+      ...text(h.pack, 'caps', 'SUPER', 10, H - 39, { tint: HOT, z: 960 }),
+      ...eq(h, 184, 24, 28, 22, 3, 1, lin('#ffd23f', 1.3), ROSE), ...ticker(h, H - 12), ...banners(h, w / 2, 80, 3),
     ];
   },
 };
@@ -180,10 +183,23 @@ const gallery: PlateSpec = {
   plan: { phraseBars: 2, banners: BANNERS, performers: [poser('hero', 'hero', 100, 'right', 0), poser('rival', 'rival', 222, 'left', 1), poser('ally', 'ally', 161, 'right', 0)] },
   dressing: (h) => {
     const out = lamps(h, GALLERY_FLOOR + 10, 104, 'dawn', 8);
-    const gem = h.pack.clip('gem-glint'), frames = h.pack.clipFrames('gem-glint');
-    if (gem && frames) for (let i = 0; i < 5; i++) {
-      const bob = Math.round(Math.sin((h.beat + i * 0.4) * Math.PI * 2) * 2);
-      pushFrame(out, frames[clipFrameIndex(gem.hold, true, h.t * 60 + i * 6)]!, 30 + i * 62, GALLERY_FLOOR + 40 + bob, false, 1, 'glow-cool', 70, 'normal');
+    const gem = h.pack.clip('gem-glint'), frames = h.pack.clipFrames('gem-glint'), glint = h.pack.clip('glint'), gframes = h.pack.clipFrames('glint');
+    const clock = { beat: h.beat, bar: h.au.songBarAt(h.t) };
+    if (gem && frames) {
+      // gems bounce on every beat of the bar (model `bounce`: ground contact on the beat) with a screen-blended glint on the contact
+      const b0 = Math.floor(h.beat / 4) * 4;
+      for (let i = 0; i < 5; i++) {
+        const x = 30 + i * 62, y = GALLERY_FLOOR + 44, m = motionAt({ model: 'bounce', from: [x, y], to: [x, y], beat0: b0, beat1: b0 + 4, amp: 12 - i }, clock);
+        pushFrame(out, frames[clipFrameIndex(gem.hold, true, h.t * 60 + i * 6)]!, m.x, m.y, false, 1, 'glow-cool', 70, 'normal');
+        const since = (h.beat - Math.floor(h.beat)) * (60 / h.au.bpm) * 60;
+        if (glint && gframes && since < 12) pushFrame(out, gframes[clipFrameIndex(glint.hold, false, since)]!, x, y - 4, false, 1, 'glow-cool', 71, 'screen');
+      }
+    }
+    // hanging lanterns: model `pendulum`, one swing per bar, extreme on the downbeat
+    if (gem && frames) for (const x of [150, 232]) {
+      const m = motionAt({ model: 'pendulum', from: [x, 17], to: [x, 17], beat0: 0, beat1: 1, amp: 28, fan: 0.55 }, clock);
+      for (let k = 1; k < 14; k++) out.push(solid(x + (m.x - x) * (k / 14), 17 + (m.y - 17) * (k / 14), 1, 1, DIM, 55));
+      pushFrame(out, frames[clipFrameIndex(gem.hold, true, h.t * 60)]!, m.x, m.y + 5, false, 1, 'glow-warm', 56, 'normal');
     }
     return out;
   },
@@ -199,10 +215,10 @@ const gallery: PlateSpec = {
     });
     const cur = h.pack.regionOf('cursor', 'hud');
     if (cur) out.push({ atlas: cur.atlas, rect: cur.rect, x: 16 + sel * 30, y: 20 - (Math.floor(h.beat * 2) % 2), z: 980, tint: HOT });
-    out.push(...text(h.pack, 'caps', 'GEMS', w - 70, 19, { tint: DIM, z: 960 }), ...text(h.pack, 'caps', counterText(hats, 4), w - 6, 19, { align: 'right', tint: HOT, z: 960 }));
-    out.push(...text(h.pack, 'caps', 'NEXT', w - 70, 29, { tint: DIM, z: 960 }), ...text(h.pack, 'caps', `${counterText(barsLeft(h), 2)} BARS`, w - 6, 29, { align: 'right', tint: INK, z: 960 }));
-    out.push(...energyBar(h, w - 120, 40, 114, 'LEVEL', () => clamp01(h.p), GOOD));
-    out.push(...eq(h, 8, H - 50, 40, 26, 3, 1, COOL, ROSE), ...ticker(h, H - 12), ...banners(h, w / 2, 92, 2));
+    out.push(...text(h.pack, 'caps', 'GEMS', w - 96, 19, { tint: DIM, z: 960 }), ...text(h.pack, 'digits', counterText(hats, 4), w - 6, 19, { align: 'right', tint: HOT, z: 960 }));
+    out.push(...text(h.pack, 'caps', 'NEXT', w - 96, 29, { tint: DIM, z: 960 }), ...text(h.pack, 'caps', `${counterText(barsLeft(h), 2)} BARS`, w - 6, 29, { align: 'right', tint: INK, z: 960 }));
+    out.push(...energyBar(h, w - 120, 62, 114, 'LEVEL', () => clamp01(h.p), GOOD));
+    out.push(...eq(h, 8, 82, 40, 22, 3, 1, COOL, ROSE), ...ticker(h, H - 12), ...banners(h, w / 2, 92, 2));
     return out;
   },
 };
@@ -217,15 +233,16 @@ const select: PlateSpec = {
   hud: (h) => {
     const w = h.nativeW, H = h.nativeH, sel = ((Math.floor(h.bar) % 4) + 4) % 4, title = typeof h.params.title === 'string' && h.params.title ? String(h.params.title).toUpperCase().slice(0, 18) : 'PIXEL STAGE';
     const out: SpriteDraw[] = [...header(h, INK, HOT)];
-    out.push(...box(h.pack, 'panel', w / 2 - 92, 26, 184, 36, 940), ...text(h.pack, 'caps', title, w / 2, 32, { align: 'center', scale: 3, tint: lin('#ffe680', 1.5), z: 960 }));
-    out.push(...text(h.pack, 'caps', Math.floor(h.beat * 2) % 2 === 0 ? 'STANDBY' : '       ', w / 2, 52, { align: 'center', tint: DIM, z: 960 }));
+    const ts = textWidth(h.pack, 'caps', title, 3) <= 280 ? 3 : textWidth(h.pack, 'caps', title, 2) <= 280 ? 2 : 1, tw = textWidth(h.pack, 'caps', title, ts) + 20;
+    out.push(...box(h.pack, 'panel', w / 2 - tw / 2, 24, tw, 8 * ts + 26, 940), ...text(h.pack, 'caps', title, w / 2, 30, { align: 'center', scale: ts, tint: lin('#ffe680', 1.5), z: 960 }));
+    out.push(...text(h.pack, 'caps', Math.floor(h.beat * 2) % 2 === 0 ? 'STANDBY' : '       ', w / 2, 30 + 8 * ts + 6, { align: 'center', tint: DIM, z: 960 }));
     SELECTS.forEach(([, name], i) => {
       const x = 58 + i * 68, on = i === sel;
-      out.push(...box(h.pack, 'panel', x - 28, 92, 56, 62, on ? 945 : 940, on ? lin('#ffffff', 1.2) : undefined, on ? 1 : 0.8));
+      out.push(...box(h.pack, 'panel', x - 28, 92, 56, 62, on ? 61 : 60, on ? lin('#9ab0ff', 1.0) : undefined, on ? 1 : 0.8));
       out.push(...text(h.pack, 'caps', name, x, 157, { align: 'center', tint: on ? HOT : DIM, z: 960 }));
       if (on) { const cur = h.pack.regionOf('cursor', 'hud'); if (cur) out.push({ atlas: cur.atlas, rect: cur.rect, x: x - 4, y: 82 - (Math.floor(h.beat * 2) % 2), z: 980, tint: HOT, scale: 1 }); }
     });
-    out.push(...eq(h, 8, 66, 52, 20, 3, 2, lin('#8a2aff', 1.3), lin('#2affd0', 1.3)), ...ticker(h, H - 12), ...banners(h, w / 2, 110, 2));
+    out.push(...eq(h, 8, 77, 52, 12, 3, 2, lin('#8a2aff', 1.3), lin('#2affd0', 1.3)), ...ticker(h, H - 12), ...banners(h, w / 2, 110, 2));
     return out;
   },
 };

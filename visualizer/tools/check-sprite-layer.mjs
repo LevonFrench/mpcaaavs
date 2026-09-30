@@ -337,16 +337,17 @@ function plates(map) { return M.planShow(map, M.PIXEL_STAGE_SHOW, {}); }
         ok(Number.isInteger(sh.spec.beat1), `${name}/${p.id}: ${sh.spec.model} arrives on a whole beat`);
         ok(sh.spec.beat1 - sh.spec.beat0 >= 0.999, 'flight at least the asked beats');
         near(au.beatAt(sh.t0), sh.spec.beat0, 'shot launches on its event', 1e-6);
-        if (!['orbit', 'swoop', 'spread', 'boomerang', 'sine', 'bounce', 'arc', 'straight', 'homing'].includes(sh.spec.model)) continue;
+        if (!['orbit', 'swoop', 'spread', 'boomerang', 'sine', 'bounce', 'arc', 'straight', 'homing', 'fall', 'rise'].includes(sh.spec.model)) continue;
         if (['orbit'].includes(sh.spec.model)) continue;
         const end = M.motionAt(sh.spec, { beat: sh.spec.beat1, bar: 0 });
         if (sh.spec.model === 'swoop') { const mid = M.motionAt(sh.spec, { beat: (sh.spec.beat0 + sh.spec.beat1) / 2, bar: 0 }); close(P(mid), sh.spec.to, 'swoop hits the target on its middle beat'); }
         else if (sh.spec.model === 'spread') near(Math.hypot(end.x - sh.spec.from[0], end.y - sh.spec.from[1]), Math.hypot(sh.spec.to[0] - sh.spec.from[0], sh.spec.to[1] - sh.spec.from[1]), 'spread range', 1e-6);
-        else if (sh.spec.model !== 'boomerang') close(P(end), sh.spec.to, `${sh.spec.model} shot arrives at its target`);
+        else if (sh.spec.model === 'boomerang') close(P(end), sh.spec.from, 'a boomerang is back in the thrower\'s hand on its beat');
+        else close(P(end), sh.spec.to, `${sh.spec.model} shot arrives at its target`);
       }
     }
   }
-  ok(shotsSeen > 300 && ['arc', 'homing', 'straight', 'sine', 'spread', 'swoop', 'orbit'].every((m) => models.has(m)), `the plates launch ${shotsSeen} shots over ${[...models].join(', ')}`);
+  ok(shotsSeen > 300 && ['arc', 'homing', 'straight', 'sine', 'spread', 'swoop', 'orbit', 'boomerang', 'fall', 'rise'].every((m) => models.has(m)), `the plates launch ${shotsSeen} shots over ${[...models].join(', ')}`);
   stats.shots = shotsSeen;
 }
 
