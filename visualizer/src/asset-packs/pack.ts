@@ -79,3 +79,29 @@ export class AssetPack {
     return frozen;
   }
 }
+
+/** Atlas rectangle of one glyph of a font's grid, or undefined when the font has no such character. */
+export function glyphRect(font: FontDef, char: string): Rect | undefined {
+  const index = Array.from(font.chars).indexOf(char);
+  if (index < 0) return undefined;
+  const column = index % font.columns, row = Math.floor(index / font.columns);
+  return [font.rect[0] + column * font.cell[0], font.rect[1] + row * font.cell[1], font.cell[0], font.cell[1]];
+}
+/** Horizontal advance of a character (its glyph's advance, or undefined for a character the font lacks). */
+export function glyphAdvance(font: FontDef, char: string): number | undefined {
+  const index = Array.from(font.chars).indexOf(char);
+  return index < 0 ? undefined : font.advance[index];
+}
+
+/** The colours of a palette at `beat`: each cycle rotates its `from..to` range once per `beats`, in whole-step colour cycling (as indexed
+ * art does). A pure function of the beat, so a seek lands on the same colours. */
+export function paletteColorsAt(palette: PaletteDef, beat: number): readonly string[] {
+  const colors = palette.colors.slice();
+  for (const cycle of palette.cycles) {
+    const span = cycle.to - cycle.from + 1, shift = Math.floor((((beat / cycle.beats) % 1) + 1) % 1 * span);
+    if (shift === 0) continue;
+    const ring = colors.slice(cycle.from, cycle.to + 1);
+    for (let i = 0; i < span; i++) colors[cycle.from + i] = ring[(i + shift) % span]!;
+  }
+  return colors;
+}
