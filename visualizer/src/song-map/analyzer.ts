@@ -41,13 +41,12 @@ export function planRegions(totalSamples: number, sampleRate: number, coreSecond
   return plans;
 }
 
-/** The region under the playhead first, then the following regions, then the earlier ones. */
+/** The region under the playhead first, then the regions after it in order, then the earlier ones. */
 export function orderRegions(plans: readonly RegionPlan[], playheadSample: number, done: ReadonlySet<number> = new Set()): RegionPlan[] {
   const open = plans.filter(p => !done.has(p.index));
-  const current = open.findIndex(p => playheadSample >= p.coreStart && playheadSample < p.coreEnd);
-  if (current < 0) return open;
-  const pivot = open[current]!.index;
-  return [...open.filter(p => p.index >= pivot), ...open.filter(p => p.index < pivot)];
+  const pivot = open.findIndex(p => p.coreEnd > playheadSample);
+  if (pivot <= 0) return open;
+  return [...open.slice(pivot), ...open.slice(0, pivot)];
 }
 
 export interface SongMapSnapshot {

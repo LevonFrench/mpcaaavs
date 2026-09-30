@@ -278,3 +278,20 @@ export const FIXTURES: readonly FixtureSpec[] = [
   { name: 'dnb-174', style: 'dnb', sampleRate: 48000, tempo: [{ fromBar: 0, bpm: 174 }], lead: .12, arrangement: STANDARD_ARRANGEMENT, seed: 41 },
   { name: 'house-120-to-128', style: 'house', sampleRate: 44100, tempo: [{ fromBar: 0, bpm: 120 }, { fromBar: 40, bpm: 128 }], lead: 0, arrangement: STANDARD_ARRANGEMENT, seed: 53 },
 ];
+
+/** Ground-truth bass line: sustained notes from E1 to C3 (41 Hz to 131 Hz), no drums. Exercises the bass pitch track alone. */
+export function renderBassFixture(sampleRate = 44100): { left: Float32Array; right: Float32Array; truth: Pick<FixtureTruth, 'duration' | 'bass' | 'onsets'> } {
+  const midis = [28, 31, 33, 36, 40, 43, 45, 38, 35, 30, 41, 47, 34, 29, 44, 48];
+  const noteLen = .7, gap = .1, lead = 1, duration = lead + midis.length * (noteLen + gap) + 1;
+  const total = Math.ceil(duration * sampleRate);
+  const ctx: Ctx = { rate: sampleRate, left: new Float32Array(total), right: new Float32Array(total), rng: new Rng(7) };
+  const bass: FixtureTruth['bass'] = [];
+  midis.forEach((midi, i) => {
+    const start = lead + i * (noteLen + gap);
+    bassNote(ctx, start, noteLen, midi, .5, null, i % 2 === 1);
+    bass.push({ start, end: start + noteLen, midi });
+  });
+  let peak = 0; for (let i = 0; i < total; i++) peak = Math.max(peak, Math.abs(ctx.left[i]!), Math.abs(ctx.right[i]!));
+  const g = peak > 0 ? .9 / peak : 1; for (let i = 0; i < total; i++) { ctx.left[i]! *= g; ctx.right[i]! *= g; }
+  return { left: ctx.left, right: ctx.right, truth: { duration, bass, onsets: { kick: [], snare: [], hat: [], vocal: [] } } };
+}

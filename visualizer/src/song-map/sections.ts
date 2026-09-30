@@ -112,7 +112,7 @@ function linearSlope(values: number[]): number {
   return sxy / sxx;
 }
 
-interface Stats { voiced: number; drumLevel: number; bass: number; maxDrums: number; maxBass: number; len: number; energy: number; drums: boolean; low: boolean; rising: boolean; roll: boolean; drumRate: number; snareRate: number; silent: boolean }
+interface Stats { len: number; energy: number; drums: boolean; low: boolean; rising: boolean; roll: boolean; drumRate: number; snareRate: number; silent: boolean }
 
 function stats(list: Bar[], d: Draft, maxDrums: number, maxBass: number, pitched: boolean): Stats {
   const span = list.slice(d.a, d.b);
@@ -124,7 +124,7 @@ function stats(list: Bar[], d: Draft, maxDrums: number, maxBass: number, pitched
   const snareFirst = span.slice(0, half).reduce((s, bar) => s + bar.snare, 0) / half;
   const snareLast = span.slice(half).reduce((s, bar) => s + bar.snare, 0) / Math.max(1, span.length - half);
   return {
-    drumLevel, bass, maxDrums, maxBass, voiced: avg(bar => bar.voiced), len: span.length, energy,
+    len: span.length, energy,
     drums: drumRate >= .35 || avg(bar => bar.hat) >= .5 || drumLevel >= .7 * maxDrums,
     low: pitched ? avg(bar => bar.voiced) >= .5 : bass >= .4 * maxBass,
     rising: rise >= .12,
@@ -167,8 +167,6 @@ function label(list: Bar[], drafts: Draft[], pitched: boolean, atStart: boolean,
     else if (!s.drums) roles[i] = !s.low && s.len >= 4 ? 'breakdown' : 'break';
     else roles[i] = 'groove';
   }
-  const debug = (globalThis as { __songMapSectionDebug?: (rows: unknown[]) => void }).__songMapSectionDebug;
-  debug?.(st.map((s, i) => ({ ...s, role: roles[i], start: drafts[i]!.start })));
   return roles as SectionRole[];
 }
 
@@ -193,7 +191,6 @@ function islandSections(input: SectionInput, a: number, b: number): { drafts: Dr
     picked.set(at, Math.max(picked.get(at) ?? 0, v));
   }
   const cuts = [...picked.keys()].sort((x, y) => x - y);
-  (globalThis as { __songMapNoveltyDebug?: (rows: unknown) => void }).__songMapNoveltyDebug?.({ N: Array.from(N, v => +v.toFixed(2)), thr, q0: phraseRef, starts: list.map(bar => +bar.start.toFixed(1)), cuts });
   // Sections shorter than 2 bars need strong boundaries on both sides.
   const strong = (bar: number) => (picked.get(bar) ?? 0) >= .5 * max;
   const kept: number[] = [];

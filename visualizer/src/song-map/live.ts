@@ -129,9 +129,9 @@ export class SongMapLive {
   }
 
   private append(left: Float32Array, right: Float32Array): void {
-    if (!this.pending) { this.pending = { l: new Float32Array(this.batch), r: new Float32Array(this.batch) }; this.pendingLength = 0; }
     let at = 0;
     while (at < left.length) {
+      if (!this.pending) { this.pending = { l: new Float32Array(this.batch), r: new Float32Array(this.batch) }; this.pendingLength = 0; }
       const room = this.batch - this.pendingLength, take = Math.min(room, left.length - at);
       this.pending.l.set(left.subarray(at, at + take), this.pendingLength);
       this.pending.r.set(right.subarray(at, at + take), this.pendingLength);
