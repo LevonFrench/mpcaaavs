@@ -21,7 +21,8 @@ globalThis.clearTimeout=()=>{};
 Object.defineProperty(globalThis,'performance',{value:{now:()=>now},configurable:true});
 globalThis.requestAnimationFrame=fn=>raf=fn;globalThis.devicePixelRatio=1;
 globalThis.Worker=class {
- constructor(url){assert.ok(String(url).endsWith('nerv-render.worker.js'));this.requests=[];this.dead=false;workers.push(this);}
+ // NERV presets load the show engine's worker by default (same load/render protocol), with its fonts next to the page
+ constructor(url){const u=new URL(String(url));assert.equal(u.pathname,'/dist/show-render.worker.js');assert.equal(u.searchParams.get('assets'),'https://aaavs.invalid/show-assets/');this.requests=[];this.dead=false;workers.push(this);}
  postMessage(m){this.requests.push(m);}terminate(){this.dead=true;}
  send(type){const bitmap={width:640,height:360,closed:false,close(){this.closed=true;}};this.onmessage({data:{type,bitmap}});return bitmap;}
 };

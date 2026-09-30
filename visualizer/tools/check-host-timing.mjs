@@ -42,7 +42,8 @@ async function boot({random=()=>.5}={}){
  globalThis.requestAnimationFrame=fn=>env.raf=fn;globalThis.devicePixelRatio=1;
  delete globalThis.matchMedia;delete globalThis.ResizeObserver;
  globalThis.Worker=class {
-  constructor(url){assert.ok(String(url).endsWith('nerv-render.worker.js'));this.requests=[];this.dead=false;workers.push(this);}
+  // NERV presets load the show engine's worker by default (same load/render protocol as nerv-render.worker.js)
+  constructor(url){assert.ok(new URL(String(url)).pathname.endsWith('/show-render.worker.js'));this.requests=[];this.dead=false;workers.push(this);}
   postMessage(m){this.requests.push(m);}terminate(){this.dead=true;}
   send(type){const bitmap={width:640,height:360,closed:false,close(){this.closed=true;}};this.onmessage({data:{type,bitmap}});return bitmap;}
  };

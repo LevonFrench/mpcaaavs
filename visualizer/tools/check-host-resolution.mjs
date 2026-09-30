@@ -91,7 +91,7 @@ globalThis.clearTimeout = () => {};
 globalThis.requestAnimationFrame = fn => { raf = fn; };
 globalThis.devicePixelRatio = 1;
 globalThis.Worker = class {
-  constructor(url) { this.kind = String(url).includes('nerv-render') ? 'nerv' : 'avs'; this.requests = []; this.dead = false; this.outstanding = 0; workers.push(this); }
+  constructor(url) { this.kind = /(nerv|show)-render/.test(String(url)) ? 'nerv' : 'avs'; this.requests = []; this.dead = false; this.outstanding = 0; workers.push(this); }
   postMessage(m) { this.requests.push(m); if (m.type === 'render') this.outstanding++; }
   terminate() { this.dead = true; }
   renders() { return this.requests.filter(r => r.type === 'render'); }

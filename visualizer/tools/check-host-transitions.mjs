@@ -135,7 +135,7 @@ async function boot({catalog, matchMedia = null} = {}) {
   Object.defineProperty(globalThis, 'performance', {value: {now: () => env.now}, configurable: true});
   globalThis.requestAnimationFrame = fn => { env.raf = fn; }; globalThis.devicePixelRatio = 1;
   globalThis.Worker = class {
-    constructor(url) { this.kind = String(url).includes('nerv-render') ? 'nerv' : 'avs'; this.requests = []; this.dead = false; workers.push(this); }
+    constructor(url) { this.kind = /(nerv|show)-render/.test(String(url)) ? 'nerv' : 'avs'; this.requests = []; this.dead = false; workers.push(this); }
     postMessage(m) { this.requests.push(m); }
     terminate() { this.dead = true; }
     send(type) { const bitmap = {width: 640, height: 360, closed: false, close() { this.closed = true; }}; this.onmessage({data: {type, bitmap}}); return bitmap; }
