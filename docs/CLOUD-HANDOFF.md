@@ -133,6 +133,62 @@ flag, detached-part rects, optional indexed palettes).
    seeks.
 8. Still renderer support: plates using the test pack render at 1080p and 4K.
 
+## Task 7: track metadata for every show (new branch `cloud/track-info`, from `aaavs-integration`)
+
+Owner priority: do this before building more show plates. Shows currently print
+placeholders ("UNKNOWN ARTIST", "AUDIO SIGNAL") because no host tells the
+visualizer what is playing. Title cards, episode numbers, credits, stage banners
+and lyric plates should show the real song, in each show's own typography.
+
+1. **Shared contract** `visualizer/src/track-info.ts`: `TrackInfo` with title,
+   artist, album, albumArtist, year, trackNumber, trackTotal, discNumber, genre,
+   composer, comment, duration, tagged BPM and key (seed the song map when
+   present, never override a confident analysis), cover art (decoded image),
+   unsynced lyrics, synced lyrics (timed lines), a `source` per field
+   (`tags`, `filename`, `host`, `unknown`) and a revision number. Pure helpers:
+   filename fallback parsing ("Artist - Title", "01 Title", "01. Artist - Title"),
+   text cleanup (trim, strip "(Official Video)"-style noise optionally),
+   typographic forms (upper-case, smart quotes), and a stable "episode number"
+   (track number, else a hash-derived 01-99 so it is deterministic per track).
+2. **Standalone Player**: read tags from the opened File in a worker with a
+   self-written parser (no new dependencies): ID3v2.2/2.3/2.4 (text frames,
+   TXXX, APIC, USLT, SYLT, TBPM, TKEY), ID3v1, FLAC/Ogg Vorbis comments and
+   METADATA_BLOCK_PICTURE, MP4/M4A `ilst` atoms incl. `covr`, APEv2, WAV
+   LIST/INFO and id3 chunks. Also a sidecar `.lrc` next to the file when the host
+   can read it. Fuzz-safe: bounded sizes, malformed frames rejected, never
+   throws into the player.
+3. **MPC host (native, Windows)**: MPC-HC already reads title/author through
+   IAMMediaContent (`m_pAMMC` in `src/mpc-hc/MainFrm.cpp`) and finds cover art
+   (`src/mpc-hc/CoverArt.cpp`). Add a bridge message from
+   `src/mpc-hc/AAAVSView.cpp` to the WebView, sent on file open and on change:
+   `{"type":"track","title","artist","album","year","track","genre",
+   "duration","path-basename","cover":<data URL or virtual-host URL>}` (JSON
+   escaped, size-bounded, no full local paths). Also pass the file's basename so
+   the web side can apply the filename fallback. Where MPC exposes more fields
+   (IAMMediaContent2, the splitter's IPropertyBag / resource bag for embedded
+   pictures), use them. You cannot compile Windows C++: keep the change small,
+   mirror existing message code, mark it UNCOMPILED; the owner's machine builds
+   and verifies it. The web side must work with whatever subset arrives.
+4. **Shows consume it**: pass `TrackInfo` to every show engine and the NERV
+   preset dialect (worker protocol field, revisioned; changes mid-play update
+   the card on the next plate, never mid-animation). NERV: the boot/title card
+   (the "NEON OVERDRIVE" card) shows the song title with the artist, EPISODE:NN
+   from the episode number, the end card and credits use artist/album/year, the
+   Japanese subtitle line stays a fixed show line unless a tag provides one. Keep
+   neutral placeholders only when nothing is known.
+5. **Typography hooks for future shows**: title-card primitives that render a
+   string in (a) the show's bundled OFL fonts and (b) a pack-provided bitmap font
+   (glyph grid region in an asset pack, e.g. a game's own font ripped locally),
+   with fitting, tracking and line breaking, and graceful fallback for glyphs the
+   bitmap font lacks. Synced lyrics become available to shows as timed lines
+   (for later lyric plates).
+6. **Privacy**: metadata and cover art stay in memory; never persisted with
+   presets or setups, never logged in full, never written into release packages.
+7. Checks: parser fixtures for every format (build tiny synthetic files in code),
+   malformed/huge frame rejection, filename fallback cases, episode number
+   determinism, NERV title card showing given metadata in a still, and the
+   placeholder path. `npm run check`, both builds, release-package check.
+
 ## Task 4: integration branch (after tasks 1 and 2 pass)
 
 Create `cloud/integration` from `aaavs-integration`, merge

@@ -334,7 +334,9 @@ function render(slot: Slot) {
         blend:Math.min(1,fade!.progress),fadeSeconds:fade!.seconds,transitionBeats:fadeBeats,transitionBoundary:boundary,transitionAccent:1,transitionReduced:reducedMotion}:{})})}:{}) };
   slot.renderRevision=clockRevision;slot.renderedPosition=position;slot.sentAt=performance.now();slot.sized=`${width}x${height}`;
   slot.worker.postMessage(request, [data]);
-  slot.timeout = window.setTimeout(() => fail(slot, 'Preset render timed out'), 5000);
+  // A NERV preset's first frame on the show engine compiles shaders and builds its plate in the worker; inside the MPC
+  // WebView that can exceed the steady-state budget, and a timeout here marks the preset failed so navigation skips it.
+  slot.timeout = window.setTimeout(() => fail(slot, 'Preset render timed out'), isNerv && slot.bitmap === null ? 20000 : 5000);
 }
 function fail(slot: Slot, reason: string) {
   if (slot.dead) return;
